@@ -1,0 +1,30 @@
+# GitHub Secret Scanner Pro - 依赖列表
+# 安装命令: pip install -r requirements.txt
+#
+# 重要提示：
+#   pip install aiohttp[speedups] aiodns
+#   speedups 包含 cchardet 和 aiodns，可显著提升性能
+
+# GitHub API 客户端
+PyGithub>=2.1.1
+
+# 异步 HTTP 客户端（高性能核心）
+# [speedups] 包含：cchardet, aiodns, brotli
+aiohttp[speedups]>=3.9.0
+aiodns>=3.1.0
+
+# DNS 异步解析（中国大陆网络优化）
+# aiodns 依赖 pycares
+pycares>=4.0.0
+
+# Rich TUI 界面
+rich>=13.7.0
+
+# 彩色日志输出
+loguru>=0.7.2
+
+# 重试机制
+urllib3>=2.0.0
+
+# SSL 支持（HTTPS 代理）
+certifi>=2023.0.0
