@@ -7,7 +7,7 @@ Target: Leaked API Keys on GitHub (OpenAI, Claude, Gemini, Azure)
 ```
 
 ![TUI Dashboard](assets/screenshot.png)
-
+![TUI Dashboard](assets/screenshot1.png)
 ---
 
 ## What is this?
