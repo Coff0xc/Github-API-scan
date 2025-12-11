@@ -36,7 +36,7 @@ GitHub Secret Scanner Pro 是一款高性能的自动化工具，专为安全研
 
 *   **⚡ 极致性能**: 基于 `asyncio` + `aiohttp` 的异步架构，支持 **100+ 高并发** 验证，吞吐量极高。
 *   **🎯 多平台支持**: 原生支持验证多种主流 AI 服务：
-    *   **OpenAI**: 支持标准 Key 及 Project Key，自动识别 GPT-4 权限、RPM 等级（企业级/免费试用）。
+    *   **OpenAI**: 支持标准 Key 及 Project Key，自动识别 GPT-4/GPT-4o/GPT-4-Turbo 权限、RPM 等级（企业级/免费试用）。
     *   **Anthropic (Claude)**: 识别 Claude-3 Opus/Sonnet 等高价值模型。
     *   **Google Gemini**: 识别 Gemini Pro 权限。
     *   **Azure OpenAI**: 上下文感知的 Endpoint 提取与验证。
@@ -66,7 +66,7 @@ git clone https://github.com/yourusername/github-secret-scanner.git
 cd github-secret-scanner
 
 # 安装依赖
-# 推荐安装 speedups 扩展以获得最佳性能
+# 推荐安装 speedups 扩展以获得最佳性能 (包含 cchardet, aiodns, brotli)
 pip install -r requirements.txt
 ```
 
@@ -143,10 +143,14 @@ $env:GITHUB_TOKENS = "ghp_xxx,ghp_yyy,ghp_zzz"
 python main.py
 ```
 
-如果你需要指定代理：
+如果你需要指定代理或数据库路径：
 
 ```bash
+# 指定代理
 python main.py --proxy http://127.0.0.1:7890
+
+# 指定自定义数据库路径
+python main.py --db my_keys.db
 ```
 
 ### 导出结果
@@ -180,7 +184,7 @@ python main.py --stats
 
 ## 📊 结果查看
 
-扫描结果会自动保存在 `leaked_keys.db` SQLite 数据库中。
+扫描结果会自动保存在 `leaked_keys.db` SQLite 数据库中（除非通过 `--db` 指定了其他路径）。
 
 ### 使用内置查看器
 
@@ -217,8 +221,6 @@ python view_db.py
 ## 📚 相关文档
 
 - [快速开始指南](QUICKSTART.md) - 5 分钟快速配置
-- [GitHub 发布指南](GITHUB_PUBLISH_GUIDE.md) - 如何发布项目到 GitHub
-- [安全检查清单](SECURITY_CHECKLIST.md) - 发布前的安全检查
 - [贡献指南](CONTRIBUTING.md) - 如何参与项目开发
 
 ## ⚠️ 免责声明
