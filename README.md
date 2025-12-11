@@ -10,6 +10,28 @@ GitHub Secret Scanner Pro 是一款高性能的自动化工具，专为安全研
 
 > ⚠️ **免责声明**: 本项目仅用于授权的安全测试和教育目的。严禁用于非法扫描或利用他人凭证。使用者需自行承担所有法律责任。
 
+## 📸 运行截图
+
+<div align="center">
+  <img src="assets/screenshot.png" alt="Dashboard" width="800"/>
+  <br>
+  <br>
+  <img src="assets/screenshot1.png" alt="Results" width="800"/>
+</div>
+
+## 📖 目录
+
+- [核心特性](#-核心特性)
+- [快速开始](#-快速开始)
+- [安装](#-安装)
+- [配置](#-配置)
+- [使用指南](#-使用指南)
+- [结果查看](#-结果查看)
+- [项目结构](#-项目结构)
+- [相关文档](#-相关文档)
+- [贡献](#-贡献)
+- [许可证](#-许可证)
+
 ## ✨ 核心特性
 
 *   **⚡ 极致性能**: 基于 `asyncio` + `aiohttp` 的异步架构，支持 **100+ 高并发** 验证，吞吐量极高。
@@ -111,7 +133,7 @@ $env:GITHUB_TOKENS = "ghp_xxx,ghp_yyy,ghp_zzz"
 *   **方法 C (命令行参数)**:
     运行时使用 `--proxy` 参数。
 
-## 🚀 使用方法
+## 🖥️ 使用指南
 
 ### 启动扫描
 
@@ -156,6 +178,23 @@ python main.py --export output.txt --status quota_exceeded
 python main.py --stats
 ```
 
+## 📊 结果查看
+
+扫描结果会自动保存在 `leaked_keys.db` SQLite 数据库中。
+
+### 使用内置查看器
+
+项目提供了一个简单的数据库查看工具 `view_db.py`：
+
+```bash
+python view_db.py
+```
+
+该工具将显示：
+- 数据库中的表结构
+- 记录总数
+- 前 10 条记录预览
+
 ## 📂 项目结构
 
 *   `main.py`: 程序入口，负责协调各组件。
@@ -165,6 +204,7 @@ python main.py --stats
 *   `ui.py`: 基于 Rich 的终端界面实现。
 *   `database.py`: SQLite 数据库封装。
 *   `leaked_keys.db`: 默认数据存储文件。
+*   `view_db.py`: 数据库查看工具。
 
 ## 🤝 贡献
 
