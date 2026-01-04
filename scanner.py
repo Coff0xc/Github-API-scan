@@ -21,6 +21,7 @@ from typing import Optional, List, Set, Tuple
 from dataclasses import dataclass
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
+from functools import lru_cache
 
 import aiohttp
 from aiohttp import ClientTimeout, TCPConnector
@@ -181,36 +182,31 @@ KNOWN_RELAY_DOMAINS = [
 
 # 测试 Key 关键词（Key 中包含这些则跳过）
 TEST_KEY_PATTERNS = [
-    'test',
-    'demo',
-    'example',
-    'sample',
-    'fake',
-    'dummy',
-    'placeholder',
-    'xxx',
-    'your_',
-    'your-',
-    '<your',
-    '{your',
-    'abcdef',
-    '123456',
-    'insert',
-    'replace',
-    'xxxxxx',
-    'aaaaaa',
-    # 新增：开发/测试环境关键词
-    'dev_',
-    'dev-',
-    'staging',
-    'sandbox',
-    'tutorial',
-    'workshop',
-    'playground',
-    'temp_',
-    'tmp_',
-    'mock_',
-    'stub_',
+    # 基础测试关键词
+    'test', 'demo', 'example', 'sample', 'fake', 'dummy', 'placeholder',
+    'xxx', 'your_', 'your-', '<your', '{your', 'abcdef', '123456',
+    'insert', 'replace', 'xxxxxx', 'aaaaaa',
+    # 开发/测试环境关键词
+    'dev_', 'dev-', 'staging', 'sandbox', 'tutorial', 'workshop',
+    'playground', 'temp_', 'tmp_', 'mock_', 'stub_',
+    # 新增：更多假值模式
+    'changeme', 'fixme', 'todo', 'secret', 'password', 'credential',
+    'redacted', 'hidden', 'masked', 'obfuscated', 'censored',
+    'null', 'none', 'undefined', 'empty', 'blank',
+    'default', 'template', 'boilerplate', 'skeleton',
+    # 常见占位符
+    'api_key_here', 'your_api_key', 'enter_key', 'put_key',
+    'add_your', 'fill_in', 'replace_with', 'insert_your',
+]
+
+# 高熵值假阳性模式（看起来像真 Key 但实际是假的）
+HIGH_ENTROPY_FALSE_POSITIVES = [
+    # Base64 编码的常见字符串
+    'dGVzdA==',  # "test"
+    'ZXhhbXBsZQ==',  # "example"
+    'c2FtcGxl',  # "sample"
+    # UUID 格式（不是 API Key）
+    r'^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$',
 ]
 
 
@@ -289,43 +285,45 @@ class ScanResult:
 #                              工具函数
 # ============================================================================
 
+@lru_cache(maxsize=4096)
 def calculate_entropy(s: str) -> float:
     """
-    计算字符串的香农熵 (Shannon Entropy)
-    
+    计算字符串的香农熵 (Shannon Entropy) - 带 LRU 缓存
+
     真正的 API Key 熵值高（看起来像乱码）
     测试 Key (如 sk-test-12345) 熵值低（有规律）
-    
+
     Args:
         s: 输入字符串
-        
+
     Returns:
         熵值（0-8 之间，越高越随机）
     """
     if not s:
         return 0.0
-    
+
     # 统计字符频率
     freq = Counter(s)
     length = len(s)
-    
+
     # 计算熵
     entropy = 0.0
     for count in freq.values():
         if count > 0:
             p = count / length
             entropy -= p * math.log2(p)
-    
+
     return entropy
 
 
+@lru_cache(maxsize=2048)
 def is_test_key(api_key: str) -> bool:
     """
-    检测是否为测试/示例 Key
-    
+    检测是否为测试/示例 Key - 带 LRU 缓存
+
     Args:
         api_key: API Key
-        
+
     Returns:
         是否为测试 Key
     """
@@ -333,19 +331,20 @@ def is_test_key(api_key: str) -> bool:
     return any(pattern in key_lower for pattern in TEST_KEY_PATTERNS)
 
 
+@lru_cache(maxsize=1024)
 def is_blacklisted_url(url: str) -> bool:
     """
-    检测 URL 是否在黑名单中
-    
+    检测 URL 是否在黑名单中 - 带 LRU 缓存
+
     Args:
         url: URL 字符串
-        
+
     Returns:
         是否在黑名单中
     """
     if not url:
         return False
-    
+
     url_lower = url.lower()
     return any(blacklist in url_lower for blacklist in DOMAIN_BLACKLIST)
 
@@ -426,6 +425,9 @@ class GitHubScanner:
         # 异步下载组件
         self._async_semaphore = asyncio.Semaphore(ASYNC_DOWNLOAD_CONCURRENCY)
         self._aiohttp_session: Optional[aiohttp.ClientSession] = None
+        # 事件循环复用 - 避免频繁创建/销毁
+        self._event_loop: Optional[asyncio.AbstractEventLoop] = None
+        self._loop_lock = threading.Lock()
     
     def _init_github_clients(self):
         """初始化 GitHub 客户端池"""
@@ -470,12 +472,22 @@ class GitHubScanner:
         except Exception as e:
             self._log(f"预加载 SHA 失败: {e}", "WARN")
     
+    def _get_event_loop(self) -> asyncio.AbstractEventLoop:
+        """获取或创建事件循环 - 线程安全复用"""
+        with self._loop_lock:
+            if self._event_loop is None or self._event_loop.is_closed():
+                self._event_loop = asyncio.new_event_loop()
+            return self._event_loop
+
     async def _get_aiohttp_session(self) -> aiohttp.ClientSession:
-        """获取或创建 aiohttp session"""
+        """获取或创建 aiohttp session - 全局复用"""
         if self._aiohttp_session is None or self._aiohttp_session.closed:
             connector = TCPConnector(
                 limit=ASYNC_DOWNLOAD_CONCURRENCY,
-                force_close=True
+                limit_per_host=20,  # 单主机连接限制
+                ttl_dns_cache=300,  # DNS 缓存 5 分钟
+                keepalive_timeout=30,  # 保持连接 30 秒
+                enable_cleanup_closed=True
             )
             self._aiohttp_session = aiohttp.ClientSession(
                 connector=connector,
@@ -545,17 +557,17 @@ class GitHubScanner:
     
     def _run_async_download(self, files_metadata: List[Tuple[str, str, any]]) -> List[Tuple[str, str, str]]:
         """
-        在同步上下文中运行异步下载
-        
-        创建新的事件循环来执行异步任务
+        在同步上下文中运行异步下载 - 复用事件循环
+
+        使用持久化事件循环避免频繁创建/销毁开销
         """
-        loop = asyncio.new_event_loop()
+        loop = self._get_event_loop()
+        asyncio.set_event_loop(loop)
         try:
             return loop.run_until_complete(self._async_download_batch(files_metadata))
-        finally:
-            # 关闭 session
-            loop.run_until_complete(self._close_aiohttp_session())
-            loop.close()
+        except Exception as e:
+            logger.debug(f"异步下载异常: {type(e).__name__}: {e}")
+            return []
     
     def _is_key_processed(self, api_key: str) -> bool:
         with self._processed_lock:
@@ -622,7 +634,13 @@ class GitHubScanner:
     
     def _should_skip_key(self, api_key: str) -> tuple:
         """
-        检查是否应该跳过这个 Key
+        检查是否应该跳过这个 Key (增强版)
+        
+        过滤规则：
+        1. 测试 Key 检测
+        2. 熵值过滤
+        3. 重复字符检测
+        4. 常见假值模式
         
         Returns:
             (should_skip, reason)
@@ -631,23 +649,54 @@ class GitHubScanner:
         if is_test_key(api_key):
             return True, "test_key"
         
-        # 2. 计算熵值
-        # 去掉前缀后计算（如 sk-proj- 部分）
+        # 2. 去掉前缀后计算
         key_body = api_key
-        if api_key.startswith('sk-proj-'):
-            key_body = api_key[8:]
-        elif api_key.startswith('sk-ant-'):
-            key_body = api_key[7:]
-        elif api_key.startswith('sk-'):
-            key_body = api_key[3:]
-        elif api_key.startswith('AIza'):
-            key_body = api_key[4:]
+        prefixes = ['sk-proj-', 'sk-ant-', 'sk-', 'AIza', 'hf_', 'gsk_']
+        for prefix in prefixes:
+            if api_key.startswith(prefix):
+                key_body = api_key[len(prefix):]
+                break
         
+        # 3. 熵值过滤
         entropy = calculate_entropy(key_body)
         if entropy < ENTROPY_THRESHOLD:
             return True, f"low_entropy:{entropy:.2f}"
         
+        # 4. 重复字符检测 (如 aaaaaaa, 1111111)
+        if len(set(key_body)) < 5:
+            return True, "repetitive_chars"
+        
+        # 5. 常见假值模式
+        fake_patterns = [
+            'your_api_key', 'your-api-key', 'api_key_here',
+            'insert_key', 'replace_me', 'placeholder',
+            'xxxxxxxx', 'yyyyyyyy', '12345678', 'abcdefgh',
+            'test1234', 'demo1234', 'sample12'
+        ]
+        key_lower = api_key.lower()
+        for pattern in fake_patterns:
+            if pattern in key_lower:
+                return True, f"fake_pattern:{pattern}"
+        
+        # 6. 连续字符检测 (如 abcdefgh, 12345678)
+        if self._has_sequential_chars(key_body, 6):
+            return True, "sequential_chars"
+        
         return False, ""
+    
+    def _has_sequential_chars(self, s: str, min_len: int = 6) -> bool:
+        """检测连续递增/递减字符"""
+        if len(s) < min_len:
+            return False
+        count = 1
+        for i in range(1, len(s)):
+            if ord(s[i]) == ord(s[i-1]) + 1 or ord(s[i]) == ord(s[i-1]) - 1:
+                count += 1
+                if count >= min_len:
+                    return True
+            else:
+                count = 1
+        return False
     
     def _should_skip_url(self, url: str) -> tuple:
         """
@@ -718,8 +767,8 @@ class GitHubScanner:
             if any(ind in path.lower() for ind in doc_indicators):
                 return False
                 
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"异常: {type(e).__name__}")
         
         return True
     
@@ -954,8 +1003,8 @@ class GitHubScanner:
                         try:
                             content = code_file.decoded_content.decode('utf-8', errors='ignore')
                             found_count += self._process_downloaded_file(html_url, content, found_count)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"异常: {type(e).__name__}")
                     
                     # 达到批量大小，执行异步下载
                     if len(files_batch) >= batch_size:
@@ -965,7 +1014,8 @@ class GitHubScanner:
                         if self.dashboard:
                             self.dashboard.update_stats(current_token_index=self._current_client_index)
                     
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"扫描异常: {type(e).__name__}: {e}")
                     continue
             
             # 处理剩余的文件
@@ -1013,8 +1063,8 @@ class GitHubScanner:
                 try:
                     content = code_file.decoded_content.decode('utf-8', errors='ignore')
                     found_count += self._process_downloaded_file(html_url, content, found_count)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"异常: {type(e).__name__}")
         
         return found_count
     
@@ -1040,7 +1090,10 @@ class GitHubScanner:
         results = self._extract_keys_from_content(content, source_url)
         
         for result in results:
-            self.result_queue.put(result)
+            try:
+                self.result_queue.put(result, timeout=5)
+            except Exception as e:
+                logger.debug(f"异常: {type(e).__name__}")  # 队列满时跳过
             found_count += 1
             self.stats["total_found"] += 1
             

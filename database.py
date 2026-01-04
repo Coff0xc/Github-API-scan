@@ -82,6 +82,10 @@ class Database:
         """获取数据库连接的上下文管理器"""
         conn = sqlite3.connect(self.db_path, check_same_thread=False)
         conn.row_factory = sqlite3.Row
+        # 启用 WAL 模式 - 提升并发读写性能
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA cache_size=-64000")  # 64MB 缓存
         try:
             yield conn
         finally:
@@ -389,3 +393,56 @@ class Database:
             is_high_value=bool(row_dict.get("is_high_value", 0)),
             found_time=datetime.fromisoformat(row_dict["found_time"]) if row_dict.get("found_time") else None
         )
+
+    # ========================================================================
+    #                           扫描进度持久化 (断点续传)
+    # ========================================================================
+
+    def save_progress(self, current_index: int, total: int, is_completed: bool = False):
+        """保存扫描进度"""
+        with self._lock:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS scan_progress (
+                        id INTEGER PRIMARY KEY, current_index INTEGER,
+                        total INTEGER, is_completed BOOLEAN, update_time DATETIME
+                    )
+                """)
+                cursor.execute("""
+                    INSERT OR REPLACE INTO scan_progress (id, current_index, total, is_completed, update_time)
+                    VALUES (1, ?, ?, ?, ?)
+                """, (current_index, total, 1 if is_completed else 0, datetime.now().isoformat()))
+                conn.commit()
+
+    def load_progress(self) -> dict:
+        """加载扫描进度"""
+        with self._lock:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS scan_progress (
+                        id INTEGER PRIMARY KEY, current_index INTEGER,
+                        total INTEGER, is_completed BOOLEAN, update_time DATETIME
+                    )
+                """)
+                conn.commit()
+                cursor.execute("SELECT current_index, total, is_completed FROM scan_progress WHERE id = 1")
+                row = cursor.fetchone()
+                if row:
+                    return {"current_index": row[0], "total": row[1], "is_completed": bool(row[2])}
+                return {"current_index": 0, "total": 0, "is_completed": False}
+
+    def reset_progress(self):
+        """重置扫描进度"""
+        with self._lock:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS scan_progress (
+                        id INTEGER PRIMARY KEY, current_index INTEGER,
+                        total INTEGER, is_completed BOOLEAN, update_time DATETIME
+                    )
+                """)
+                cursor.execute("DELETE FROM scan_progress WHERE id = 1")
+                conn.commit()

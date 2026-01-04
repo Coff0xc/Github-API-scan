@@ -32,9 +32,12 @@ env/
 *.swp
 *.swo
 *~
+.claude/
 
 # Database
 *.db
+*.db-shm
+*.db-wal
 *.sqlite
 *.sqlite3
 
@@ -57,3 +60,5 @@ Thumbs.db
 
 # Project specific
 leaked_keys.db
+valid_keys.txt
+found_keys.txt

@@ -33,20 +33,40 @@ from database import Database, KeyStatus
 from scanner import start_scanner
 from validator import start_validators
 from ui import Dashboard
+from source_pastebin import start_pastebin_scanner
+from source_gist import start_gist_scanner
+from source_searchcode import start_searchcode_scanner
+from source_gitlab import start_gitlab_scanner
+from source_realtime import start_realtime_scanner
 
 
 class SecretScanner:
     """密钥扫描系统主类"""
-    
-    def __init__(self):
+
+    def __init__(self, enable_pastebin: bool = False, enable_gist: bool = False,
+                 enable_searchcode: bool = False, enable_gitlab: bool = False,
+                 enable_realtime: bool = False, pastebin_api_key: str = ""):
         self.stop_event = threading.Event()
         self.result_queue = queue.Queue(maxsize=1000)
         self.db = Database(config.db_path)
         self.dashboard = Dashboard()
-        
+
         self.scanner_thread = None
         self.validator_threads = []
-        
+        self.pastebin_thread = None
+        self.gist_thread = None
+        self.searchcode_thread = None
+        self.gitlab_thread = None
+        self.realtime_thread = None
+
+        # 扫描源开关
+        self.enable_pastebin = enable_pastebin
+        self.enable_gist = enable_gist
+        self.enable_searchcode = enable_searchcode
+        self.enable_gitlab = enable_gitlab
+        self.enable_realtime = enable_realtime
+        self.pastebin_api_key = pastebin_api_key
+
         # 信号处理
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
@@ -62,31 +82,74 @@ class SecretScanner:
             total_tokens=len(config.github_tokens),
             is_running=True
         )
-        
+
         # 启动验证器（Consumer）
-        # 注意：每个线程内部使用 asyncio + aiohttp，实现 100 并发
-        # 因此只需 1-2 个线程即可达到极高吞吐
         self.validator_threads = start_validators(
             self.result_queue,
             self.db,
             self.stop_event,
             dashboard=self.dashboard,
-            num_workers=2  # 2 线程 x 100 并发 = 200 并发验证
+            num_workers=2
         )
-        
-        # 启动扫描器（Producer）
+
+        # 启动 GitHub 扫描器（Producer）
         self.scanner_thread = start_scanner(
             self.result_queue,
             self.db,
             self.stop_event,
             dashboard=self.dashboard
         )
-        
+
+        # 启动 Pastebin 扫描器
+        if self.enable_pastebin:
+            self.pastebin_thread = start_pastebin_scanner(
+                self.result_queue,
+                self.stop_event,
+                dashboard=self.dashboard,
+                api_key=self.pastebin_api_key
+            )
+            self.dashboard.add_log("[Pastebin] 扫描源已启用", "INFO")
+
+        # 启动 Gist 扫描器
+        if self.enable_gist:
+            self.gist_thread = start_gist_scanner(
+                self.result_queue,
+                self.stop_event,
+                dashboard=self.dashboard
+            )
+            self.dashboard.add_log("[Gist] 扫描源已启用", "INFO")
+
+        # 启动 SearchCode 扫描器
+        if self.enable_searchcode:
+            self.searchcode_thread = start_searchcode_scanner(
+                self.result_queue,
+                self.stop_event,
+                dashboard=self.dashboard
+            )
+            self.dashboard.add_log("[SearchCode] 扫描源已启用", "INFO")
+
+        # 启动 GitLab 扫描器
+        if self.enable_gitlab:
+            self.gitlab_thread = start_gitlab_scanner(
+                self.result_queue,
+                self.stop_event,
+                dashboard=self.dashboard
+            )
+            self.dashboard.add_log("[GitLab] 扫描源已启用", "INFO")
+
+        # 启动实时监控扫描器
+        if self.enable_realtime:
+            self.realtime_thread = start_realtime_scanner(
+                self.result_queue,
+                self.stop_event,
+                dashboard=self.dashboard
+            )
+            self.dashboard.add_log("[Realtime] 实时监控已启用", "INFO")
+
         # 启动 TUI
         with self.dashboard.start():
             try:
                 while not self.stop_event.is_set():
-                    # 更新队列大小
                     self.dashboard.update_stats(queue_size=self.result_queue.qsize())
                     self.dashboard.refresh()
                     time.sleep(0.25)
@@ -99,13 +162,28 @@ class SecretScanner:
         """停止系统"""
         if self.stop_event.is_set():
             return
-        
+
         self.dashboard.stop()
         self.stop_event.set()
-        
+
         if self.scanner_thread and self.scanner_thread.is_alive():
             self.scanner_thread.join(timeout=3)
-        
+
+        if self.pastebin_thread and self.pastebin_thread.is_alive():
+            self.pastebin_thread.join(timeout=3)
+
+        if self.gist_thread and self.gist_thread.is_alive():
+            self.gist_thread.join(timeout=3)
+
+        if self.searchcode_thread and self.searchcode_thread.is_alive():
+            self.searchcode_thread.join(timeout=3)
+
+        if self.gitlab_thread and self.gitlab_thread.is_alive():
+            self.gitlab_thread.join(timeout=3)
+
+        if self.realtime_thread and self.realtime_thread.is_alive():
+            self.realtime_thread.join(timeout=3)
+
         for thread in self.validator_threads:
             if thread.is_alive():
                 thread.join(timeout=1)
@@ -249,21 +327,30 @@ def main():
         description="GitHub Secret Scanner Pro",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    
+
     parser.add_argument('--export', type=str, metavar='FILE', help='导出 Key 到文本文件')
     parser.add_argument('--export-csv', type=str, metavar='CSV', help='导出 Key 到 CSV 文件')
     parser.add_argument('--status', type=str, help='导出状态过滤 (valid/quota_exceeded)')
     parser.add_argument('--stats', action='store_true', help='显示统计')
     parser.add_argument('--db', type=str, default='leaked_keys.db', help='数据库路径')
     parser.add_argument('--proxy', type=str, help='代理地址')
-    
+
+    # 扫描源选项
+    parser.add_argument('--pastebin', action='store_true', help='启用 Pastebin 扫描源')
+    parser.add_argument('--pastebin-key', type=str, default='', help='Pastebin Pro API Key')
+    parser.add_argument('--gist', action='store_true', help='启用 GitHub Gist 扫描源')
+    parser.add_argument('--searchcode', action='store_true', help='启用 SearchCode 扫描源')
+    parser.add_argument('--gitlab', action='store_true', help='启用 GitLab Snippets 扫描源')
+    parser.add_argument('--realtime', action='store_true', help='启用实时监控 (GitHub Events)')
+    parser.add_argument('--all-sources', action='store_true', help='启用所有扫描源')
+
     args = parser.parse_args()
-    
+
     if args.proxy:
         config.proxy_url = args.proxy
     if args.db:
         config.db_path = args.db
-    
+
     # 导出模式
     if args.export or args.export_csv:
         if args.export:
@@ -271,14 +358,27 @@ def main():
         if args.export_csv:
             export_keys_csv(config.db_path, args.export_csv, args.status)
         return
-    
+
     # 统计模式
     if args.stats:
         show_stats(config.db_path)
         return
-    
+
     # 扫描模式
-    scanner = SecretScanner()
+    enable_pastebin = args.pastebin or args.all_sources
+    enable_gist = args.gist or args.all_sources
+    enable_searchcode = args.searchcode or args.all_sources
+    enable_gitlab = args.gitlab or args.all_sources
+    enable_realtime = args.realtime or args.all_sources
+
+    scanner = SecretScanner(
+        enable_pastebin=enable_pastebin,
+        enable_gist=enable_gist,
+        enable_searchcode=enable_searchcode,
+        enable_gitlab=enable_gitlab,
+        enable_realtime=enable_realtime,
+        pastebin_api_key=args.pastebin_key
+    )
     scanner.start()
 
 

@@ -59,23 +59,87 @@ CIRCUIT_BREAKER_HALF_OPEN_REQUESTS = 3  # 半开状态允许的试探请求数
 # ============================================================================
 
 REGEX_PATTERNS = {
+    # ============================================================================
+    #                          主流 AI 平台 (高优先级)
+    # ============================================================================
+
     # OpenAI: 标准 key (sk-xxx) 和 project key (sk-proj-xxx)
-    # 使用负面断言排除常见假 Key 前缀和后缀
-    # 新增: dev|staging|sandbox 等开发/测试环境关键词
-    "openai": r'(?<!example_)(?<!test_)(?<!demo_)(?<!fake_)(?<!sample_)(?<!dev_)(?<!staging_)sk-(?:proj-)?(?!(?:placeholder|example|test|demo|your|xxx|fake|sample|dev|staging|sandbox|xxxxxx|abcdef|123456|insert|replace))[a-zA-Z0-9\-_]{20,}',
-    
-    # Google Gemini: AIza 开头，必须 39 字符
-    # 排除明显的测试 Key
+    # 新格式: sk-proj-xxx (项目 Key), sk-svcacct-xxx (服务账户)
+    "openai": r'(?<!example_)(?<!test_)(?<!demo_)(?<!fake_)(?<!sample_)(?<!dev_)(?<!staging_)sk-(?:proj-|svcacct-)?(?!(?:placeholder|example|test|demo|your|xxx|fake|sample|dev|staging|sandbox|xxxxxx|abcdef|123456|insert|replace))[a-zA-Z0-9\-_]{20,}',
+
+    # Google Gemini / Google AI Studio: AIza 开头，39 字符
     "gemini": r'(?<!test)(?<!example)(?<!sample)(?<!dev)AIza[0-9A-Za-z\-_]{35}',
-    
+
     # Anthropic Claude: sk-ant- 开头
-    # 使用负面断言排除假 Key
-    # 新增: dev|staging|sandbox 等开发/测试环境关键词
     "anthropic": r'(?<!example_)(?<!test_)(?<!dev_)(?<!staging_)sk-ant-(?!(?:api0|xxx|test|demo|example|sample|dev|staging|sandbox|placeholder))[a-zA-Z0-9\-_]{20,}',
-    
-    # Azure OpenAI: 32位十六进制（严格匹配）
-    # 排除常见假值如全0、全f、全a、全e等
+
+    # Azure OpenAI: 32位十六进制
     "azure": r'(?<![a-f0-9])(?!0{32})(?!f{32})(?!a{32})(?!e{32})[a-f0-9]{32}(?![a-f0-9])',
+
+    # ============================================================================
+    #                          新兴 AI 平台 (中优先级)
+    # ============================================================================
+
+    # HuggingFace: hf_ 开头
+    "huggingface": r'hf_[a-zA-Z0-9]{34,}',
+
+    # Groq: gsk_ 开头，52字符
+    "groq": r'gsk_[a-zA-Z0-9]{52}',
+
+    # DeepSeek: sk- 开头，48+ 字符 (与 OpenAI 区分靠长度)
+    "deepseek": r'sk-[a-zA-Z0-9]{48,}',
+
+    # Cohere: 40字符 Base64
+    "cohere": r'(?<!test)(?<!example)[a-zA-Z0-9]{40}(?=.*cohere)',
+
+    # Mistral AI: 32字符
+    "mistral": r'(?<!test)(?<!example)[a-zA-Z0-9]{32}(?=.*mistral)',
+
+    # Together AI: 64字符十六进制
+    "together": r'[a-f0-9]{64}(?=.*together)',
+
+    # Replicate: r8_ 开头
+    "replicate": r'r8_[a-zA-Z0-9]{37,}',
+
+    # Perplexity: pplx- 开头
+    "perplexity": r'pplx-[a-zA-Z0-9]{48,}',
+
+    # Fireworks AI: fw_ 开头
+    "fireworks": r'fw_[a-zA-Z0-9]{40,}',
+
+    # Anyscale: esecret_ 开头
+    "anyscale": r'esecret_[a-zA-Z0-9]{40,}',
+
+    # ============================================================================
+    #                          云服务商 API (低优先级)
+    # ============================================================================
+
+    # AWS Access Key: AKIA 开头，20字符
+    "aws_access_key": r'AKIA[0-9A-Z]{16}',
+
+    # AWS Secret Key: 40字符 Base64
+    "aws_secret_key": r'(?<!test)(?<!example)[A-Za-z0-9/+=]{40}(?=.*(?:aws|secret|key))',
+
+    # GitHub Token: ghp_, gho_, ghu_, ghs_, ghr_ 开头
+    "github_token": r'(?:ghp|gho|ghu|ghs|ghr)_[a-zA-Z0-9]{36,}',
+
+    # Stripe: sk_live_ 或 rk_live_ 开头
+    "stripe": r'(?:sk|rk)_live_[a-zA-Z0-9]{24,}',
+
+    # Twilio: SK 开头，32字符
+    "twilio": r'SK[a-f0-9]{32}',
+
+    # SendGrid: SG. 开头
+    "sendgrid": r'SG\.[a-zA-Z0-9\-_]{22,}\.[a-zA-Z0-9\-_]{22,}',
+
+    # Slack: xox[baprs]- 开头
+    "slack": r'xox[baprs]-[0-9]{10,}-[0-9]{10,}-[a-zA-Z0-9]{24,}',
+
+    # Discord Bot Token
+    "discord": r'[MN][A-Za-z\d]{23,}\.[\w-]{6}\.[\w-]{27}',
+
+    # Telegram Bot Token
+    "telegram": r'\d{8,10}:[a-zA-Z0-9_-]{35}',
 }
 
 # Azure 特征识别正则
@@ -139,6 +203,13 @@ class Config:
     
     # ==================== 数据库配置 ====================
     db_path: str = "leaked_keys.db"
+
+    # ==================== Pastebin 配置 ====================
+    # Pastebin Pro API Key (可选，用于 Scraping API)
+    # 免费用户可以不配置，但扫描效率较低
+    pastebin_api_key: str = field(
+        default_factory=lambda: os.getenv("PASTEBIN_API_KEY", "")
+    )
     
     # ==================== 线程配置 ====================
     consumer_threads: int = 20  # 验证器线程数（IO 密集型，可开多）
@@ -152,50 +223,175 @@ class Config:
     # ==================== 扫描配置 ====================
     context_window: int = 10  # 上下文窗口（前后各 N 行）
     
-    # 搜索关键词 - 高精度狙击模式 (Sniper Dorks)
-    # 排除测试文件，专注高价值目标
-    # 优化: 增加 NOT staging NOT sandbox 排除干扰
+    # 搜索关键词 - 高精度狙击模式 (Sniper Dorks) v2.0
+    # 策略: 精准文件名 + 排除测试/示例 + 多平台覆盖
     search_keywords: List[str] = field(default_factory=lambda: [
-        # === 1. 狙击 .env 文件 (命中率最高) ===
-        'filename:.env OPENAI_API_KEY NOT staging NOT sandbox',
-        'filename:.env ANTHROPIC_API_KEY NOT staging',
-        'filename:.env GEMINI_API_KEY',
-        'filename:.env.local OPENAI_API_KEY',
-        'filename:.env.production sk-proj- NOT staging',
-        
-        # === 2. 狙击特定配置文件 ===
+        # ============================================================================
+        #                          1. OpenAI 高价值目标
+        # ============================================================================
+        'filename:.env OPENAI_API_KEY NOT staging NOT sandbox NOT example',
+        'filename:.env.local OPENAI_API_KEY NOT test',
+        'filename:.env.production OPENAI_API_KEY',
+        'filename:.env.prod OPENAI_API_KEY',
+        'filename:secrets.yaml openai_api_key NOT example',
+        'filename:secrets.json OPENAI_API_KEY NOT test',
         'filename:config.json sk-proj- NOT example NOT test',
-        'filename:secrets.yaml api_key NOT staging NOT sandbox',
-        'filename:secrets.json openai NOT example',
-        'filename:.env.example sk- NOT test NOT dev',
-        
-        # === 3. 狙击中转站配置 ===
-        'filename:.env BASE_URL openai NOT staging',
-        'filename:.env OPENAI_BASE_URL NOT sandbox',
-        'filename:config.py ONEAPI',
-        'new-api sk- NOT test NOT demo',
-        
-        # === 4. 排除干扰的精准搜索 ===
-        'sk-proj- language:python NOT test NOT example NOT mock NOT staging NOT sandbox',
-        'sk-ant-api03 language:python NOT test NOT example NOT staging',
-        'AIzaSy language:json NOT example NOT test NOT dev',
-        
-        # === 5. Anthropic Claude 狙击 ===
-        'filename:.env CLAUDE_API_KEY NOT staging',
-        'filename:.env anthropic_api_key NOT sandbox',
+        'sk-proj- language:python NOT test NOT example NOT mock NOT staging',
+        'sk-proj- language:javascript NOT test NOT example NOT mock',
+        '"Authorization: Bearer sk-" NOT test NOT example',
+        'OPENAI_API_KEY= sk- NOT test NOT example NOT staging',
+
+        # ============================================================================
+        #                          2. Anthropic Claude
+        # ============================================================================
+        'filename:.env ANTHROPIC_API_KEY NOT staging NOT example',
+        'filename:.env CLAUDE_API_KEY NOT sandbox NOT test',
+        'filename:.env.production ANTHROPIC_API_KEY',
+        'sk-ant-api03 NOT test NOT example NOT staging',
         '"x-api-key" sk-ant- NOT test NOT example',
-        
-        # === 6. Azure OpenAI ===
-        'filename:.env AZURE_OPENAI_API_KEY NOT staging',
+        'anthropic_api_key language:python NOT test NOT example',
+
+        # ============================================================================
+        #                          3. Google Gemini / AI Studio
+        # ============================================================================
+        'filename:.env GEMINI_API_KEY NOT test NOT example',
+        'filename:.env GOOGLE_AI_KEY NOT staging',
+        'AIzaSy language:json NOT example NOT test NOT dev',
+        'AIzaSy language:python NOT test NOT example',
+        'generativelanguage.googleapis.com key= NOT test',
+
+        # ============================================================================
+        #                          4. Azure OpenAI
+        # ============================================================================
+        'filename:.env AZURE_OPENAI_API_KEY NOT staging NOT example',
+        'filename:.env AZURE_OPENAI_KEY NOT test',
         'openai.azure.com api-key NOT example NOT test NOT staging',
+        'AZURE_OPENAI_ENDPOINT language:python NOT test',
+
+        # ============================================================================
+        #                          5. 中转站 / One-API / New-API
+        # ============================================================================
+        'filename:.env OPENAI_BASE_URL NOT sandbox NOT example',
+        'filename:.env BASE_URL openai NOT staging NOT test',
+        'filename:config.py ONEAPI NOT test',
+        'filename:config.py one-api NOT example',
+        'new-api sk- NOT test NOT demo NOT example',
+        'one-api sk- NOT test NOT demo',
+        'api.openai-proxy sk- NOT test',
+
+        # ============================================================================
+        #                          6. HuggingFace
+        # ============================================================================
+        'filename:.env HUGGINGFACE_API_KEY NOT test NOT example',
+        'filename:.env HF_TOKEN NOT staging',
+        'filename:.env HUGGINGFACE_TOKEN NOT test',
+        'hf_ language:python NOT test NOT example NOT mock',
+        '"Authorization: Bearer hf_" NOT test',
+
+        # ============================================================================
+        #                          7. Groq
+        # ============================================================================
+        'filename:.env GROQ_API_KEY NOT test NOT example',
+        'gsk_ language:python NOT test NOT example',
+        'api.groq.com Authorization NOT test',
+
+        # ============================================================================
+        #                          8. DeepSeek
+        # ============================================================================
+        'filename:.env DEEPSEEK_API_KEY NOT test NOT example',
+        'api.deepseek.com sk- NOT test NOT example',
+        'deepseek language:python sk- NOT test',
+
+        # ============================================================================
+        #                          9. 新兴 AI 平台
+        # ============================================================================
+        # Cohere
+        'filename:.env COHERE_API_KEY NOT test NOT example',
+        'cohere.ai api-key NOT test',
+
+        # Mistral
+        'filename:.env MISTRAL_API_KEY NOT test NOT example',
+        'api.mistral.ai NOT test NOT example',
+
+        # Together AI
+        'filename:.env TOGETHER_API_KEY NOT test',
+        'api.together.xyz NOT test NOT example',
+
+        # Replicate
+        'filename:.env REPLICATE_API_TOKEN NOT test',
+        'r8_ language:python NOT test NOT example',
+
+        # Perplexity
+        'filename:.env PERPLEXITY_API_KEY NOT test',
+        'pplx- language:python NOT test',
+
+        # Fireworks
+        'filename:.env FIREWORKS_API_KEY NOT test',
+        'fw_ language:python NOT test NOT example',
+
+        # ============================================================================
+        #                          10. 云服务商 API
+        # ============================================================================
+        # AWS
+        'filename:.env AWS_ACCESS_KEY_ID NOT test NOT example NOT staging',
+        'filename:.env AWS_SECRET_ACCESS_KEY NOT test NOT example',
+        'AKIA language:python NOT test NOT example NOT mock',
+
+        # GitHub Token
+        'filename:.env GITHUB_TOKEN NOT test NOT example',
+        'ghp_ language:python NOT test NOT example NOT mock',
+
+        # Stripe
+        'filename:.env STRIPE_SECRET_KEY NOT test NOT example',
+        'sk_live_ NOT test NOT example NOT staging',
+
+        # Twilio
+        'filename:.env TWILIO_AUTH_TOKEN NOT test NOT example',
+
+        # SendGrid
+        'filename:.env SENDGRID_API_KEY NOT test NOT example',
+        'SG. language:python NOT test NOT example',
+
+        # ============================================================================
+        #                          11. 高价值文件路径
+        # ============================================================================
+        'path:deploy/ .env NOT test NOT example',
+        'path:production/ .env NOT staging',
+        'path:config/ secrets NOT test NOT example',
+        'path:scripts/ api_key NOT test NOT example',
+        'filename:docker-compose.yml OPENAI NOT test',
+        'filename:docker-compose.yml API_KEY NOT example',
+        'filename:Dockerfile ENV OPENAI NOT test',
     ])
     
     # ==================== 平台默认 URL ====================
     default_base_urls: Dict[str, str] = field(default_factory=lambda: {
+        # 主流 AI 平台
         "openai": "https://api.openai.com",
         "gemini": "https://generativelanguage.googleapis.com/v1beta",
         "anthropic": "https://api.anthropic.com",
-        "azure": "",  # Azure 需要从上下文提取
+        "azure": "",
+        # 新兴 AI 平台
+        "huggingface": "https://api-inference.huggingface.co",
+        "groq": "https://api.groq.com/openai/v1",
+        "deepseek": "https://api.deepseek.com",
+        "cohere": "https://api.cohere.ai/v1",
+        "mistral": "https://api.mistral.ai/v1",
+        "together": "https://api.together.xyz/v1",
+        "replicate": "https://api.replicate.com/v1",
+        "perplexity": "https://api.perplexity.ai",
+        "fireworks": "https://api.fireworks.ai/inference/v1",
+        "anyscale": "https://api.endpoints.anyscale.com/v1",
+        # 云服务商
+        "aws_access_key": "",
+        "aws_secret_key": "",
+        "github_token": "https://api.github.com",
+        "stripe": "https://api.stripe.com",
+        "twilio": "https://api.twilio.com",
+        "sendgrid": "https://api.sendgrid.com",
+        "slack": "https://slack.com/api",
+        "discord": "https://discord.com/api",
+        "telegram": "https://api.telegram.org",
     })
     
     @property
@@ -252,13 +448,17 @@ try:
         config.consumer_threads = CONSUMER_THREADS
     if 'REQUEST_TIMEOUT' in dir():
         config.request_timeout = REQUEST_TIMEOUT
-    
-    print("✅ 已加载本地配置文件 config_local.py")
+
+    # Pastebin API Key
+    if 'PASTEBIN_API_KEY' in dir():
+        config.pastebin_api_key = PASTEBIN_API_KEY
+
+    print("[OK] 已加载本地配置文件 config_local.py")
 except ImportError:
     # config_local.py 不存在，使用默认配置
     if not config.github_tokens or not any(config.github_tokens):
-        print("⚠️  警告: 未配置 GitHub Tokens！")
+        print("[WARNING] 警告: 未配置 GitHub Tokens！")
         print("   请创建 config_local.py 文件或设置环境变量 GITHUB_TOKENS")
         print("   参考: config_local.py.example")
 except Exception as e:
-    print(f"⚠️  加载 config_local.py 时出错: {e}")
+    print(f"[WARNING] 加载 config_local.py 时出错: {e}")

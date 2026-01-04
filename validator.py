@@ -16,6 +16,7 @@ from dataclasses import dataclass
 
 import aiohttp
 from aiohttp import ClientTimeout, TCPConnector
+from loguru import logger
 
 from config import (
     config, 
@@ -54,6 +55,7 @@ RPM_FREE_TRIAL_THRESHOLD = 20     # <= 20 为免费试用
 from enum import Enum
 from urllib.parse import urlparse
 import time
+import threading
 
 
 class CircuitState(Enum):
@@ -75,7 +77,7 @@ class CircuitBreaker:
     def __init__(self):
         # 域名 -> 状态信息
         self._domain_states: Dict[str, dict] = {}
-        self._lock = asyncio.Lock()
+        self._lock = threading.Lock()  # 线程安全
     
     @staticmethod
     def _extract_domain(url: str) -> str:
@@ -146,7 +148,7 @@ class CircuitBreaker:
         if self._is_protected_domain(domain):
             return CircuitState.CLOSED
         
-        async with self._lock:
+        with self._lock:
             if domain not in self._domain_states:
                 return CircuitState.CLOSED
             
@@ -173,7 +175,7 @@ class CircuitBreaker:
             return False
         else:  # HALF_OPEN
             domain = self._extract_domain(url)
-            async with self._lock:
+            with self._lock:
                 state_info = self._domain_states.get(domain, {})
                 half_open_requests = state_info.get('half_open_requests', 0)
                 if half_open_requests < CIRCUIT_BREAKER_HALF_OPEN_REQUESTS:
@@ -188,7 +190,7 @@ class CircuitBreaker:
         if self._is_protected_domain(domain):
             return
         
-        async with self._lock:
+        with self._lock:
             if domain in self._domain_states:
                 # 成功后重置状态
                 self._domain_states[domain] = {
@@ -221,7 +223,7 @@ class CircuitBreaker:
             return  # 业务错误不触发熍断
         
         # ========== 记录网络层失败 ==========
-        async with self._lock:
+        with self._lock:
             if domain not in self._domain_states:
                 self._domain_states[domain] = {
                     'state': CircuitState.CLOSED,
@@ -238,7 +240,7 @@ class CircuitBreaker:
     
     async def get_stats(self) -> Dict[str, Any]:
         """获取熍断器统计信息"""
-        async with self._lock:
+        with self._lock:
             stats = {}
             for domain, info in self._domain_states.items():
                 stats[domain] = {
@@ -368,14 +370,41 @@ class AsyncValidator:
     
     def _is_likely_valid_relay(self, base_url: str) -> bool:
         """
-        检查 URL 是否可能是有效的中转站
+        检查 URL 是否可能是有效的中转站 + SSRF 防护
         
-        排除明显不是 API 中转站的 URL
+        安全检查：
+        1. 排除明显不是 API 中转站的 URL
+        2. 阻止私有 IP 地址 (RFC1918, loopback, link-local)
+        3. 阻止危险域名后缀
         """
         if not base_url:
             return True  # 空 URL 会使用默认值
         
         url_lower = base_url.lower()
+        
+        # ========== SSRF 防护: 强制 HTTPS ==========
+        if not url_lower.startswith('https://'):
+            if not (url_lower.startswith('http://localhost') or url_lower.startswith('http://127.0.0.1')):
+                if url_lower.startswith('http://'):
+                    return False
+        
+        # ========== SSRF 防护: 阻止私有 IP ==========
+        try:
+            from urllib.parse import urlparse
+            import ipaddress
+            parsed = urlparse(base_url)
+            host = parsed.hostname or ''
+            try:
+                ip = ipaddress.ip_address(host)
+                if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+                    return False
+            except ValueError:
+                pass
+            for suffix in ['.local', '.internal', '.corp', '.lan', '.home']:
+                if host.endswith(suffix):
+                    return False
+        except Exception:
+            return False
         
         # 无效域名黑名单
         invalid_domains = [
@@ -479,7 +508,8 @@ class AsyncValidator:
             except aiohttp.ClientConnectorError as e:
                 await self._record_circuit_result(url, error=e)
                 return ValidationResult(KeyStatus.CONNECTION_ERROR, "连接失败")
-            except Exception:
+            except Exception as e:
+                logger.debug(f"验证异常: {type(e).__name__}: {e}")
                 continue
         
         # Step 2: POST /chat/completions (Fallback)
@@ -505,7 +535,8 @@ class AsyncValidator:
             except asyncio.TimeoutError as e:
                 await self._record_circuit_result(url, error=e)
                 continue
-            except Exception:
+            except Exception as e:
+                logger.debug(f"验证异常: {type(e).__name__}: {e}")
                 continue
         
         return ValidationResult(KeyStatus.INVALID, "认证失败")
@@ -706,7 +737,8 @@ class AsyncValidator:
             try:
                 async with session.post(url, headers=headers, json=body, proxy=proxy) as resp:
                     return resp.status == 200
-            except Exception:
+            except Exception as e:
+                logger.debug(f"验证异常: {type(e).__name__}: {e}")
                 continue
         return False
     
@@ -780,7 +812,8 @@ class AsyncValidator:
                             result['balance'] = balance
                             result['source'] = endpoint['path']
                             return result
-            except Exception:
+            except Exception as e:
+                logger.debug(f"验证异常: {type(e).__name__}: {e}")
                 continue
         
         return result
@@ -878,21 +911,320 @@ class AsyncValidator:
                 continue
             except aiohttp.ClientConnectorError:
                 return {'has_quota': False, 'error_type': 'connection', 'message': '连接失败'}
-            except Exception:
+            except Exception as e:
+                logger.debug(f"验证异常: {type(e).__name__}: {e}")
                 continue
         
         return {'has_quota': False, 'error_type': 'other', 'message': '无法验证'}
     
+
+    # ========================================================================
+    #                           新增平台验证方法
+    # ========================================================================
+
+    async def validate_huggingface(self, api_key: str, base_url: str) -> ValidationResult:
+        """验证 Hugging Face API Key"""
+        if not base_url:
+            base_url = "https://api-inference.huggingface.co"
+
+        headers = {"Authorization": f"Bearer {api_key}"}
+        proxy = config.proxy_url or None
+
+        session = await self._get_session()
+        try:
+            async with session.get(
+                f"{base_url.rstrip('/')}/models/gpt2",
+                headers=headers, proxy=proxy
+            ) as resp:
+                if resp.status == 200:
+                    return ValidationResult(KeyStatus.VALID, "HuggingFace 有效")
+                elif resp.status == 401:
+                    return ValidationResult(KeyStatus.INVALID, "无效")
+                elif resp.status == 429:
+                    return ValidationResult(KeyStatus.QUOTA_EXCEEDED, "配额耗尽")
+        except Exception as e:
+            logger.debug(f"HuggingFace 验证异常: {e}")
+        return ValidationResult(KeyStatus.CONNECTION_ERROR, "连接失败")
+
+    async def validate_groq(self, api_key: str, base_url: str) -> ValidationResult:
+        """验证 Groq API Key"""
+        if not base_url:
+            base_url = "https://api.groq.com/openai/v1"
+
+        headers = {"Authorization": f"Bearer {api_key}"}
+        proxy = config.proxy_url or None
+
+        session = await self._get_session()
+        try:
+            async with session.get(
+                f"{base_url.rstrip('/')}/models",
+                headers=headers, proxy=proxy
+            ) as resp:
+                if resp.status == 200:
+                    return ValidationResult(KeyStatus.VALID, "Groq 有效")
+                elif resp.status == 401:
+                    return ValidationResult(KeyStatus.INVALID, "无效")
+                elif resp.status == 429:
+                    return ValidationResult(KeyStatus.QUOTA_EXCEEDED, "配额耗尽")
+        except Exception as e:
+            logger.debug(f"Groq 验证异常: {e}")
+        return ValidationResult(KeyStatus.CONNECTION_ERROR, "连接失败")
+
+    async def validate_deepseek(self, api_key: str, base_url: str) -> ValidationResult:
+        """验证 DeepSeek API Key"""
+        if not base_url:
+            base_url = "https://api.deepseek.com"
+
+        headers = {"Authorization": f"Bearer {api_key}"}
+        proxy = config.proxy_url or None
+
+        session = await self._get_session()
+        try:
+            async with session.get(
+                f"{base_url.rstrip('/')}/models",
+                headers=headers, proxy=proxy
+            ) as resp:
+                if resp.status == 200:
+                    return ValidationResult(KeyStatus.VALID, "DeepSeek 有效")
+                elif resp.status == 401:
+                    return ValidationResult(KeyStatus.INVALID, "无效")
+                elif resp.status == 429:
+                    return ValidationResult(KeyStatus.QUOTA_EXCEEDED, "配额耗尽")
+        except Exception as e:
+            logger.debug(f"DeepSeek 验证异常: {e}")
+        return ValidationResult(KeyStatus.CONNECTION_ERROR, "连接失败")
+
+    async def validate_cohere(self, api_key: str, base_url: str) -> ValidationResult:
+        """验证 Cohere API Key"""
+        if not base_url:
+            base_url = "https://api.cohere.ai/v1"
+
+        headers = {"Authorization": f"Bearer {api_key}"}
+        proxy = config.proxy_url or None
+
+        session = await self._get_session()
+        try:
+            async with session.get(
+                f"{base_url.rstrip('/')}/models",
+                headers=headers, proxy=proxy
+            ) as resp:
+                if resp.status == 200:
+                    return ValidationResult(KeyStatus.VALID, "Cohere 有效")
+                elif resp.status == 401:
+                    return ValidationResult(KeyStatus.INVALID, "无效")
+                elif resp.status == 429:
+                    return ValidationResult(KeyStatus.QUOTA_EXCEEDED, "配额耗尽")
+        except Exception as e:
+            logger.debug(f"Cohere 验证异常: {e}")
+        return ValidationResult(KeyStatus.CONNECTION_ERROR, "连接失败")
+
+    async def validate_mistral(self, api_key: str, base_url: str) -> ValidationResult:
+        """验证 Mistral API Key"""
+        if not base_url:
+            base_url = "https://api.mistral.ai/v1"
+
+        headers = {"Authorization": f"Bearer {api_key}"}
+        proxy = config.proxy_url or None
+
+        session = await self._get_session()
+        try:
+            async with session.get(
+                f"{base_url.rstrip('/')}/models",
+                headers=headers, proxy=proxy
+            ) as resp:
+                if resp.status == 200:
+                    return ValidationResult(KeyStatus.VALID, "Mistral 有效")
+                elif resp.status == 401:
+                    return ValidationResult(KeyStatus.INVALID, "无效")
+                elif resp.status == 429:
+                    return ValidationResult(KeyStatus.QUOTA_EXCEEDED, "配额耗尽")
+        except Exception as e:
+            logger.debug(f"Mistral 验证异常: {e}")
+        return ValidationResult(KeyStatus.CONNECTION_ERROR, "连接失败")
+
+    async def validate_together(self, api_key: str, base_url: str) -> ValidationResult:
+        """验证 Together AI API Key"""
+        if not base_url:
+            base_url = "https://api.together.xyz/v1"
+
+        headers = {"Authorization": f"Bearer {api_key}"}
+        proxy = config.proxy_url or None
+
+        session = await self._get_session()
+        try:
+            async with session.get(
+                f"{base_url.rstrip('/')}/models",
+                headers=headers, proxy=proxy
+            ) as resp:
+                if resp.status == 200:
+                    return ValidationResult(KeyStatus.VALID, "Together 有效")
+                elif resp.status == 401:
+                    return ValidationResult(KeyStatus.INVALID, "无效")
+                elif resp.status == 429:
+                    return ValidationResult(KeyStatus.QUOTA_EXCEEDED, "配额耗尽")
+        except Exception as e:
+            logger.debug(f"Together 验证异常: {e}")
+        return ValidationResult(KeyStatus.CONNECTION_ERROR, "连接失败")
+
+    async def validate_replicate(self, api_key: str, base_url: str) -> ValidationResult:
+        """验证 Replicate API Key"""
+        if not base_url:
+            base_url = "https://api.replicate.com/v1"
+
+        headers = {"Authorization": f"Token {api_key}"}
+        proxy = config.proxy_url or None
+
+        session = await self._get_session()
+        try:
+            async with session.get(
+                f"{base_url.rstrip('/')}/account",
+                headers=headers, proxy=proxy
+            ) as resp:
+                if resp.status == 200:
+                    return ValidationResult(KeyStatus.VALID, "Replicate 有效")
+                elif resp.status == 401:
+                    return ValidationResult(KeyStatus.INVALID, "无效")
+                elif resp.status == 429:
+                    return ValidationResult(KeyStatus.QUOTA_EXCEEDED, "配额耗尽")
+        except Exception as e:
+            logger.debug(f"Replicate 验证异常: {e}")
+        return ValidationResult(KeyStatus.CONNECTION_ERROR, "连接失败")
+
+    async def validate_perplexity(self, api_key: str, base_url: str) -> ValidationResult:
+        """验证 Perplexity API Key"""
+        if not base_url:
+            base_url = "https://api.perplexity.ai"
+
+        headers = {"Authorization": f"Bearer {api_key}"}
+        proxy = config.proxy_url or None
+
+        session = await self._get_session()
+        try:
+            async with session.get(
+                f"{base_url.rstrip('/')}/models",
+                headers=headers, proxy=proxy
+            ) as resp:
+                if resp.status == 200:
+                    return ValidationResult(KeyStatus.VALID, "Perplexity 有效")
+                elif resp.status == 401:
+                    return ValidationResult(KeyStatus.INVALID, "无效")
+                elif resp.status == 429:
+                    return ValidationResult(KeyStatus.QUOTA_EXCEEDED, "配额耗尽")
+        except Exception as e:
+            logger.debug(f"Perplexity 验证异常: {e}")
+        return ValidationResult(KeyStatus.CONNECTION_ERROR, "连接失败")
+
+    async def validate_fireworks(self, api_key: str, base_url: str) -> ValidationResult:
+        """验证 Fireworks AI API Key"""
+        if not base_url:
+            base_url = "https://api.fireworks.ai/inference/v1"
+
+        headers = {"Authorization": f"Bearer {api_key}"}
+        proxy = config.proxy_url or None
+
+        session = await self._get_session()
+        try:
+            async with session.get(
+                f"{base_url.rstrip('/')}/models",
+                headers=headers, proxy=proxy
+            ) as resp:
+                if resp.status == 200:
+                    return ValidationResult(KeyStatus.VALID, "Fireworks 有效")
+                elif resp.status == 401:
+                    return ValidationResult(KeyStatus.INVALID, "无效")
+                elif resp.status == 429:
+                    return ValidationResult(KeyStatus.QUOTA_EXCEEDED, "配额耗尽")
+        except Exception as e:
+            logger.debug(f"Fireworks 验证异常: {e}")
+        return ValidationResult(KeyStatus.CONNECTION_ERROR, "连接失败")
+
+    async def validate_stripe(self, api_key: str, base_url: str) -> ValidationResult:
+        """验证 Stripe API Key"""
+        headers = {"Authorization": f"Bearer {api_key}"}
+        proxy = config.proxy_url or None
+
+        session = await self._get_session()
+        try:
+            async with session.get(
+                "https://api.stripe.com/v1/balance",
+                headers=headers, proxy=proxy
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    balance = sum(b.get('amount', 0) for b in data.get('available', [])) / 100
+                    return ValidationResult(KeyStatus.VALID, f"Stripe ${balance:.2f}", is_high_value=balance > 0)
+                elif resp.status == 401:
+                    return ValidationResult(KeyStatus.INVALID, "无效")
+        except Exception as e:
+            logger.debug(f"Stripe 验证异常: {e}")
+        return ValidationResult(KeyStatus.CONNECTION_ERROR, "连接失败")
+
+    async def validate_github_token(self, api_key: str, base_url: str) -> ValidationResult:
+        """验证 GitHub Token"""
+        headers = {"Authorization": f"token {api_key}"}
+        proxy = config.proxy_url or None
+
+        session = await self._get_session()
+        try:
+            async with session.get(
+                "https://api.github.com/user",
+                headers=headers, proxy=proxy
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    username = data.get('login', 'unknown')
+                    return ValidationResult(KeyStatus.VALID, f"GitHub @{username}")
+                elif resp.status == 401:
+                    return ValidationResult(KeyStatus.INVALID, "无效")
+        except Exception as e:
+            logger.debug(f"GitHub 验证异常: {e}")
+        return ValidationResult(KeyStatus.CONNECTION_ERROR, "连接失败")
+
+    async def validate_aws_access_key(self, api_key: str, base_url: str) -> ValidationResult:
+        """验证 AWS Access Key (仅格式检查，不实际调用)"""
+        # AWS 验证需要 Secret Key 配对，这里只做格式检查
+        if api_key.startswith('AKIA') and len(api_key) == 20:
+            return ValidationResult(KeyStatus.UNVERIFIED, "AWS Key 格式正确")
+        return ValidationResult(KeyStatus.INVALID, "格式错误")
+
     async def validate_single(self, result: 'ScanResult') -> ValidationResult:
         """验证单个结果（统一入口）"""
         platform = result.platform.lower()
-        
+
+        # 主流 AI 平台
         if platform == "azure" or result.is_azure:
             return await self.validate_azure(result.api_key, result.base_url)
         elif platform == "gemini":
             return await self.validate_gemini(result.api_key, result.base_url)
         elif platform == "anthropic":
             return await self.validate_anthropic(result.api_key, result.base_url)
+        # 新兴 AI 平台
+        elif platform == "huggingface":
+            return await self.validate_huggingface(result.api_key, result.base_url)
+        elif platform == "groq":
+            return await self.validate_groq(result.api_key, result.base_url)
+        elif platform == "deepseek":
+            return await self.validate_deepseek(result.api_key, result.base_url)
+        elif platform == "cohere":
+            return await self.validate_cohere(result.api_key, result.base_url)
+        elif platform == "mistral":
+            return await self.validate_mistral(result.api_key, result.base_url)
+        elif platform == "together":
+            return await self.validate_together(result.api_key, result.base_url)
+        elif platform == "replicate":
+            return await self.validate_replicate(result.api_key, result.base_url)
+        elif platform == "perplexity":
+            return await self.validate_perplexity(result.api_key, result.base_url)
+        elif platform == "fireworks":
+            return await self.validate_fireworks(result.api_key, result.base_url)
+        # 云服务商
+        elif platform == "stripe":
+            return await self.validate_stripe(result.api_key, result.base_url)
+        elif platform == "github_token":
+            return await self.validate_github_token(result.api_key, result.base_url)
+        elif platform == "aws_access_key":
+            return await self.validate_aws_access_key(result.api_key, result.base_url)
+        # 默认使用 OpenAI 兼容验证
         else:
             return await self.validate_openai(result.api_key, result.base_url)
     
@@ -1065,7 +1397,6 @@ async def run_validator_loop(
 #                          同步包装器（兼容 threading）
 # ============================================================================
 
-import threading
 import queue as sync_queue
 
 
