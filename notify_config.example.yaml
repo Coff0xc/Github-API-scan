@@ -1,0 +1,179 @@
+# GitHub Secret Scanner Pro - 通知配置文件
+# ==========================================
+#
+# 使用说明:
+# 1. 复制此文件为 notify_config.yaml
+# 2. 填入你的 Webhook/Token 信息
+# 3. 将 enabled 设置为 true 启用对应渠道
+#
+# 支持的通知渠道:
+# - Discord: 免费，无限制，支持富文本 Embed
+# - Slack: 免费，无限制，支持 Block Kit
+# - Telegram: 免费，无限制，支持 Markdown
+# - 飞书: 免费，支持卡片消息
+# - 钉钉: 免费，支持加签安全
+# - Server酱: 微信推送
+# - Bark: iOS 推送
+# - 文件: 本地记录
+# - 声音: 系统提示音
+
+# ============================================================================
+#                              Discord 配置
+# ============================================================================
+# 获取方式: 服务器设置 -> 整合 -> Webhook -> 新建 Webhook
+discord:
+  enabled: false
+  webhook_url: "https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_WEBHOOK_TOKEN"
+  # 最低通知级别: critical, high, medium, low
+  min_severity: medium
+
+# ============================================================================
+#                              Slack 配置
+# ============================================================================
+# 获取方式: https://api.slack.com/apps -> Create App -> Incoming Webhooks
+slack:
+  enabled: false
+  webhook_url: "https://hooks.slack.com/services/YOUR_TEAM_ID/YOUR_HOOK_ID/YOUR_WEBHOOK_TOKEN"
+  min_severity: medium
+
+# ============================================================================
+#                              Telegram 配置
+# ============================================================================
+# 获取方式:
+# 1. 与 @BotFather 对话，发送 /newbot 创建机器人获取 token
+# 2. 与机器人对话，访问 https://api.telegram.org/bot<TOKEN>/getUpdates 获取 chat_id
+telegram:
+  enabled: false
+  bot_token: "123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
+  chat_id: "123456789"
+  min_severity: medium
+
+# ============================================================================
+#                              飞书配置
+# ============================================================================
+# 获取方式: 飞书群设置 -> 群机器人 -> 添加机器人 -> 自定义机器人
+feishu:
+  enabled: false
+  webhook_url: "https://open.feishu.cn/open-apis/bot/v2/hook/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+  min_severity: medium
+
+# ============================================================================
+#                              钉钉配置
+# ============================================================================
+# 获取方式: 钉钉群设置 -> 智能群助手 -> 添加机器人 -> 自定义
+# 建议启用加签安全验证
+dingtalk:
+  enabled: false
+  webhook_url: "https://oapi.dingtalk.com/robot/send?access_token=xxxxxx"
+  secret: ""  # 加签密钥 (可选，建议启用)
+  min_severity: medium
+
+# ============================================================================
+#                              Server酱配置 (微信推送)
+# ============================================================================
+# 获取方式: https://sct.ftqq.com/ 注册并获取 SendKey
+serverchan:
+  enabled: false
+  send_key: "SCTxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  min_severity: high  # 建议只推送重要通知
+
+# ============================================================================
+#                              Bark 配置 (iOS 推送)
+# ============================================================================
+# 获取方式: App Store 下载 Bark 应用，获取设备 Key
+bark:
+  enabled: false
+  server_url: "https://api.day.app"  # 或自建服务器地址
+  device_key: "YOUR_DEVICE_KEY"
+  min_severity: high
+
+# ============================================================================
+#                              PushPlus 配置 (QQ/微信)
+# ============================================================================
+# 获取方式: https://www.pushplus.plus/ 注册获取 token
+pushplus:
+  enabled: false
+  token: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  min_severity: medium
+
+# ============================================================================
+#                              WxPusher 配置 (微信)
+# ============================================================================
+# 获取方式: https://wxpusher.zjiecode.com/ 注册获取 appToken 和 UID
+wxpusher:
+  enabled: false
+  app_token: "AT_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  uid: "UID_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  min_severity: medium
+
+# ============================================================================
+#                              邮件配置
+# ============================================================================
+email:
+  enabled: false
+  smtp_server: "smtp.qq.com"
+  smtp_port: 465
+  use_ssl: true
+  username: "your_email@qq.com"
+  password: "your_smtp_password"  # QQ邮箱需要使用授权码
+  from_addr: "your_email@qq.com"
+  to_addrs:
+    - "your_email@qq.com"
+  min_severity: high
+
+# ============================================================================
+#                              文件记录
+# ============================================================================
+file:
+  enabled: true
+  output_path: "~/Desktop/found_keys.txt"
+  # 也可以使用绝对路径
+  # output_path: "C:/Users/YourName/Desktop/found_keys.txt"
+
+# ============================================================================
+#                              声音提醒
+# ============================================================================
+sound:
+  enabled: true
+  # Critical 级别: 紧急警报音 (3次)
+  # High 级别: 双声提示
+  # Medium/Low 级别: 单声提示
+
+# ============================================================================
+#                              静默时段
+# ============================================================================
+# 在此时段内不发送通知 (Critical 级别除外)
+quiet_hours:
+  enabled: false
+  start: "23:00"  # 开始时间 (24小时制)
+  end: "07:00"    # 结束时间
+
+# ============================================================================
+#                              速率限制
+# ============================================================================
+rate_limit:
+  enabled: true
+  window: 60      # 时间窗口 (秒)
+  max_count: 30   # 窗口内最大通知数
+  # Critical 级别不受速率限制
+
+# ============================================================================
+#                              每日报告
+# ============================================================================
+daily_report:
+  enabled: false
+  time: "20:00"   # 发送时间 (24小时制)
+  # 报告将发送到所有启用的渠道
+
+# ============================================================================
+#                              高级设置
+# ============================================================================
+advanced:
+  # 通知去重 (避免同一个 Key 重复通知)
+  deduplication: true
+
+  # 高价值 Key 特殊处理
+  high_value_alert: true
+
+  # 日志级别: DEBUG, INFO, WARNING, ERROR
+  log_level: INFO
