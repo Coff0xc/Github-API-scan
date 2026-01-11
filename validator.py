@@ -6,6 +6,10 @@
 2. 深度价值评估 (GPT-4 探测、余额检测、RPM 透视)
 3. 状态细分（valid, invalid, quota_exceeded, connection_error）
 4. UI 仪表盘集成
+
+v2.1 优化：
+- 导出 OptimizedAsyncValidator（使用连接池和智能重试）
+- 保持原有 AsyncValidator 向后兼容
 """
 
 import asyncio
@@ -19,9 +23,9 @@ from aiohttp import ClientTimeout, TCPConnector
 from loguru import logger
 
 from config import (
-    config, 
-    PROTECTED_DOMAINS, 
-    SAFE_HTTP_STATUS_CODES, 
+    config,
+    PROTECTED_DOMAINS,
+    SAFE_HTTP_STATUS_CODES,
     CIRCUIT_BREAKER_HTTP_CODES,
     CIRCUIT_BREAKER_FAILURE_THRESHOLD,
     CIRCUIT_BREAKER_RECOVERY_TIMEOUT,
@@ -1489,5 +1493,25 @@ def start_validators(
     
     if dashboard:
         dashboard.add_log(f"启动 {actual_workers} 个异步验证器 (100 并发/个)", "INFO")
-    
+
     return threads
+
+
+# ============================================================================
+#                          v2.1 优化版导出
+# ============================================================================
+
+# 导出优化版验证器（使用连接池和智能重试）
+try:
+    from validator_optimized import OptimizedAsyncValidator
+    __all__ = ['AsyncValidator', 'OptimizedAsyncValidator', 'start_validators',
+               'ValidationResult', 'CircuitBreaker', 'circuit_breaker', 'mask_key',
+               'MAX_CONCURRENCY', 'REQUEST_TIMEOUT', 'HIGH_VALUE_MODELS',
+               'RPM_ENTERPRISE_THRESHOLD', 'RPM_FREE_TRIAL_THRESHOLD']
+except ImportError:
+    # 如果优化模块不可用，只导出原版
+    __all__ = ['AsyncValidator', 'start_validators', 'ValidationResult',
+               'CircuitBreaker', 'circuit_breaker', 'mask_key',
+               'MAX_CONCURRENCY', 'REQUEST_TIMEOUT', 'HIGH_VALUE_MODELS',
+               'RPM_ENTERPRISE_THRESHOLD', 'RPM_FREE_TRIAL_THRESHOLD']
+    logger.warning("v2.1 优化模块不可用，使用原版验证器")
