@@ -1,7 +1,12 @@
 """
-验证器模块 - 优化版 v2.1
+验证器模块 - 优化版 v2.2
 
-新增优化：
+v2.2 新增优化：
+1. 智能缓存系统 - 3层缓存架构，减少重复验证
+2. 批量验证支持 - 按域名分组，降低网络开销
+3. 域名健康度追踪 - 避免验证死域名
+
+v2.1 优化（保留）：
 1. 连接池管理 - 复用 HTTP 连接
 2. 智能重试机制 - 指数退避
 3. 改进的错误分类
@@ -31,6 +36,10 @@ from database import Database, LeakedKey, KeyStatus
 from connection_pool import get_connection_pool
 from retry_handler import RetryHandler, RetryConfig, ErrorType
 
+# v2.2: 缓存和批量验证
+from cache_manager import CacheManager, CacheConfig, get_cache_manager
+from batch_validator import BatchValidator, BatchConfig
+
 # 导入原有的熔断器和工具函数
 from validator import (
     CircuitBreaker,
@@ -49,19 +58,26 @@ class OptimizedAsyncValidator:
     """
     优化版异步验证器
 
-    v2.1 新特性：
+    v2.2 新特性：
+    - 智能缓存系统（3层缓存架构）
+    - 批量验证支持（按域名分组）
+    - 域名健康度追踪
+
+    v2.1 特性（保留）：
     - 使用连接池复用 HTTP 连接
     - 智能重试机制（指数退避）
     - 改进的性能监控
     """
 
-    def __init__(self, db: Database, dashboard=None):
+    def __init__(self, db: Database, dashboard=None,
+                 cache_config: Optional[CacheConfig] = None,
+                 batch_config: Optional[BatchConfig] = None):
         self.db = db
         self.dashboard = dashboard
         self.semaphore = asyncio.Semaphore(MAX_CONCURRENCY)
         self._circuit_breaker = circuit_breaker
 
-        # 新增：连接池和重试处理器
+        # v2.1: 连接池和重试处理器
         self._connection_pool = None
         self._retry_handler = RetryHandler(RetryConfig(
             max_retries=3,
@@ -71,6 +87,11 @@ class OptimizedAsyncValidator:
             jitter=True
         ))
 
+        # v2.2: 缓存管理器和批量验证器
+        self._cache_manager: Optional[CacheManager] = None
+        self._cache_config = cache_config
+        self._batch_validator = BatchValidator(batch_config)
+
         # 性能统计
         self._stats = {
             'total_validations': 0,
@@ -78,7 +99,22 @@ class OptimizedAsyncValidator:
             'failed_validations': 0,
             'retried_validations': 0,
             'connection_reused': 0,
+            # v2.2 新增统计
+            'cache_hits': 0,
+            'cache_misses': 0,
+            'dead_domain_skipped': 0,
+            'batch_validations': 0,
         }
+
+    async def init_cache(self):
+        """
+        初始化缓存管理器（v2.2 新增）
+
+        必须在使用验证器前调用
+        """
+        if self._cache_manager is None:
+            self._cache_manager = await get_cache_manager(self._cache_config)
+            logger.info("缓存管理器已初始化")
 
     async def _get_session(self, url: str) -> aiohttp.ClientSession:
         """
@@ -96,6 +132,7 @@ class OptimizedAsyncValidator:
     async def close(self):
         """关闭资源"""
         # 连接池由全局管理，不需要在这里关闭
+        # 缓存管理器也由全局管理
         pass
 
     def _get_proxy(self) -> Optional[str]:
@@ -250,7 +287,12 @@ class OptimizedAsyncValidator:
         """
         异步验证 OpenAI / 中转站
 
-        优化：
+        v2.2 优化：
+        1. 智能缓存 - 检查缓存避免重复验证
+        2. 域名健康度 - 跳过死域名
+        3. 批量验证支持
+
+        v2.1 优化（保留）：
         1. 使用连接池复用连接
         2. 智能重试临时错误
         3. 改进的错误处理
@@ -265,10 +307,37 @@ class OptimizedAsyncValidator:
         if not base_url:
             base_url = config.default_base_urls["openai"]
 
+        # v2.2: 检查缓存
+        if self._cache_manager:
+            cached_result = await self._cache_manager.get_validation_result(api_key, base_url)
+            if cached_result:
+                self._stats['cache_hits'] += 1
+                self._log(f"缓存命中: {mask_key(api_key)}", "DEBUG")
+                return ValidationResult(
+                    KeyStatus(cached_result['status']),
+                    cached_result.get('balance', ''),
+                    cached_result.get('model_tier', 'GPT-3.5'),
+                    cached_result.get('rpm', 0),
+                    cached_result.get('latency', 0.0),
+                    cached_result.get('is_high_value', False)
+                )
+            self._stats['cache_misses'] += 1
+
+        # v2.2: 检查域名健康度
+        if self._cache_manager:
+            is_dead = await self._cache_manager.is_domain_dead(base_url)
+            if is_dead:
+                self._stats['dead_domain_skipped'] += 1
+                self._log(f"跳过死域名: {base_url[:30]}...", "WARN")
+                return ValidationResult(KeyStatus.CONNECTION_ERROR, "域名已死")
+
         # 熔断器检查
         circuit_result = await self._check_circuit_breaker(base_url)
         if circuit_result:
             self._stats['failed_validations'] += 1
+            # 记录域名失败
+            if self._cache_manager:
+                await self._cache_manager.record_domain_failure(base_url)
             return circuit_result
 
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
@@ -289,6 +358,10 @@ class OptimizedAsyncValidator:
                         # 记录成功
                         await self._record_circuit_result(url, success=True)
                         self._stats['successful_validations'] += 1
+
+                        # v2.2: 记录域名成功
+                        if self._cache_manager:
+                            await self._cache_manager.record_domain_success(base_url)
 
                         data = await resp.json()
                         models_list = [m.get("id", "") for m in data.get("data", [])]
@@ -314,16 +387,38 @@ class OptimizedAsyncValidator:
 
                         is_high = model_tier == "GPT-4" or rpm >= RPM_ENTERPRISE_THRESHOLD
 
-                        return ValidationResult(KeyStatus.VALID, info, model_tier, rpm, 0.0, is_high)
+                        result = ValidationResult(KeyStatus.VALID, info, model_tier, rpm, 0.0, is_high)
+
+                        # v2.2: 存储到缓存
+                        if self._cache_manager:
+                            await self._cache_manager.set_validation_result(
+                                api_key, base_url,
+                                {
+                                    'status': result.status.value,
+                                    'balance': result.balance,
+                                    'model_tier': result.model_tier,
+                                    'rpm': result.rpm,
+                                    'latency': result.latency,
+                                    'is_high_value': result.is_high_value
+                                }
+                            )
+
+                        return result
 
                     elif resp.status == 429:
                         await self._record_circuit_result(url, http_status=429)
                         self._stats['failed_validations'] += 1
+                        # v2.2: 记录域名失败
+                        if self._cache_manager:
+                            await self._cache_manager.record_domain_failure(base_url)
                         return ValidationResult(KeyStatus.QUOTA_EXCEEDED, "配额耗尽")
 
                     elif resp.status in CIRCUIT_BREAKER_HTTP_CODES:
                         await self._record_circuit_result(url, http_status=resp.status)
                         self._stats['failed_validations'] += 1
+                        # v2.2: 记录域名失败
+                        if self._cache_manager:
+                            await self._cache_manager.record_domain_failure(base_url)
                         return ValidationResult(KeyStatus.CONNECTION_ERROR, f"网关错误 {resp.status}")
 
                     elif resp.status == 401:
@@ -347,25 +442,82 @@ class OptimizedAsyncValidator:
 
         # 所有 URL 变体都失败
         self._stats['failed_validations'] += 1
+        # v2.2: 记录域名失败
+        if self._cache_manager:
+            await self._cache_manager.record_domain_failure(base_url)
         return ValidationResult(KeyStatus.CONNECTION_ERROR, "连接失败")
+
+    # ========================================================================
+    #                           v2.2: 批量验证方法
+    # ========================================================================
+
+    async def validate_batch(
+        self,
+        keys: list[tuple[str, str]],
+        progress_callback=None
+    ) -> list[ValidationResult]:
+        """
+        批量验证 Key（v2.2 新增）
+
+        按域名分组验证，减少网络开销
+
+        Args:
+            keys: [(api_key, base_url), ...]
+            progress_callback: 进度回调 def(completed, total)
+
+        Returns:
+            [ValidationResult, ...]
+        """
+        self._stats['batch_validations'] += 1
+
+        async def _validate_single(api_key: str, base_url: str):
+            """单个验证的包装函数"""
+            return await self.validate_openai(api_key, base_url)
+
+        # 使用批量验证器
+        results = await self._batch_validator.validate_batch(
+            keys,
+            _validate_single,
+            progress_callback
+        )
+
+        return results
 
     def get_stats(self) -> dict:
         """获取性能统计"""
         stats = self._stats.copy()
 
-        # 添加重试处理器统计
+        # v2.1: 添加重试处理器统计
         retry_stats = self._retry_handler.get_stats()
         stats.update({
             'retry_success_rate': retry_stats.get('success_rate', 0),
             'retry_attempts': retry_stats.get('total_attempts', 0),
         })
 
-        # 添加连接池统计
+        # v2.1: 添加连接池统计
         if self._connection_pool:
             pool_stats = self._connection_pool.get_stats()
             stats.update({
                 'active_sessions': pool_stats.get('active_sessions', 0),
                 'domains': pool_stats.get('domains', []),
             })
+
+        # v2.2: 添加缓存统计
+        if self._cache_manager:
+            cache_stats = self._cache_manager.get_stats()
+            stats['cache'] = cache_stats
+
+            # 计算缓存命中率
+            total_cache_requests = self._stats['cache_hits'] + self._stats['cache_misses']
+            if total_cache_requests > 0:
+                stats['cache_hit_rate'] = (
+                    self._stats['cache_hits'] / total_cache_requests * 100
+                )
+            else:
+                stats['cache_hit_rate'] = 0.0
+
+        # v2.2: 添加批量验证统计
+        batch_stats = self._batch_validator.get_stats()
+        stats['batch'] = batch_stats
 
         return stats
