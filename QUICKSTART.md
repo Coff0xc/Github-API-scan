@@ -1,174 +1,426 @@
-# 快速开始指南
+# 快速开始 - GitHub Secret Scanner Pro 优化版
 
-本指南帮助你快速配置和运行 GitHub Secret Scanner Pro。
+5 分钟快速上手优化版扫描器。
 
-## 📋 前置要求
+---
 
-- Python 3.9 或更高版本
-- GitHub Personal Access Token
-- （可选）代理服务器（如在中国大陆使用）
-
-## 🚀 5 分钟快速开始
+## 🚀 快速安装
 
 ### 1. 克隆项目
 
-```powershell
-git clone https://github.com/YOUR_USERNAME/github-secret-scanner.git
-cd github-secret-scanner
+```bash
+git clone <repository-url>
+cd github-secret-scanner-pro
 ```
 
 ### 2. 安装依赖
 
-```powershell
-# 安装依赖包
+```bash
 pip install -r requirements.txt
-
-# 或使用国内镜像加速
-pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 ```
+
+**新增依赖说明:**
+- `aiosqlite>=0.19.0` - 异步数据库
+- `cryptography>=41.0.0` - 加密导出
+- `PyYAML>=6.0.0` - 配置文件解析
+- `uvloop>=0.19.0` - 性能提升 (仅 Linux/Mac)
 
 ### 3. 配置 GitHub Token
 
-**方式一：创建本地配置文件（推荐）**
+**方式 1: 环境变量 (推荐)**
 
-```powershell
-# 复制配置模板
-Copy-Item config_local.py.example config_local.py
-
-# 使用记事本编辑配置文件
-notepad config_local.py
+```bash
+export GITHUB_TOKENS="ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx,ghp_yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
 ```
 
-在 `config_local.py` 中填入你的 GitHub Token：
+**方式 2: 配置文件**
+
+创建 `config_local.py`:
 
 ```python
 GITHUB_TOKENS = [
-    "ghp_你的真实Token",
-    # 可以添加多个 token
+    "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "ghp_yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
 ]
 ```
 
-**方式二：使用环境变量**
+---
 
-```powershell
-# Windows PowerShell
-$env:GITHUB_TOKENS = "ghp_你的Token1,ghp_你的Token2"
+## 🎯 基础使用
 
-# 或永久设置
-[System.Environment]::SetEnvironmentVariable("GITHUB_TOKENS", "ghp_你的Token", "User")
-```
+### 启动扫描
 
-**如何获取 GitHub Token:**
+```bash
+# 使用优化版
+python main_optimized.py
 
-1. 访问 https://github.com/settings/tokens
-2. 点击 "Generate new token (classic)"
-3. 勾选 `public_repo` 权限
-4. 生成并复制 token
-
-### 4. 运行程序
-
-```powershell
-# 直接运行
+# 或者重命名后使用
+mv main_optimized.py main.py
 python main.py
-
-# 如果需要代理
-python main.py --proxy http://127.0.0.1:7890
 ```
 
-### 5. 查看结果
+### 查看统计
 
-程序会在终端显示 Rich TUI 界面，实时展示扫描进度。
-
-结果保存在 SQLite 数据库 `leaked_keys.db` 中。
-
-## 📊 导出结果
-
-```powershell
-# 导出为文本文件
-python main.py --export output.txt
-
-# 导出为 CSV（包含详细元数据）
-python main.py --export-csv results.csv
-
-# 查看统计信息
-python main.py --stats
+```bash
+python main_optimized.py --stats
 ```
 
-## ⚙️ 高级配置
-
-### 配置代理
-
-如果需要使用代理访问 GitHub API：
-
-```python
-# 在 config_local.py 中添加
-PROXY_URL = "http://127.0.0.1:7890"
+输出示例:
+```
+=== 数据库统计 ===
+总 Key 数量: 1234
+有效 Key: 56
+无效 Key: 1178
+待验证: 0
 ```
 
-或使用环境变量：
+### 导出数据
 
-```powershell
-$env:PROXY_URL = "http://127.0.0.1:7890"
+```bash
+# 导出所有有效 Key
+python main_optimized.py --export valid_keys.txt --status valid
+
+# 导出为 CSV
+python main_optimized.py --export-csv keys.csv --status valid
 ```
-
-### 调整线程数
-
-```python
-# 在 config_local.py 中调整
-CONSUMER_THREADS = 20  # 验证器线程数，可根据机器性能调整
-```
-
-### 修改搜索关键词
-
-编辑 `config.py` 中的 `search_keywords` 列表，自定义搜索策略。
-
-## 🐛 故障排除
-
-### 问题：提示未配置 GitHub Tokens
-
-**解决方案：**
-- 确认已创建 `config_local.py` 文件
-- 或设置了环境变量 `GITHUB_TOKENS`
-- Token 格式正确（以 `ghp_` 或 `github_pat_` 开头）
-
-### 问题：GitHub API 速率限制
-
-**解决方案：**
-- 添加更多 GitHub Tokens 到配置文件
-- 单个 token: 30次/分钟
-- 多个 token 轮询：速率成倍增长
-
-### 问题：网络连接失败
-
-**解决方案：**
-- 检查代理设置是否正确
-- 尝试使用 `--proxy` 参数指定代理
-- 确认代理服务正常运行
-
-### 问题：安装依赖失败
-
-**解决方案：**
-```powershell
-# 使用国内镜像
-pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
-
-# 或分步安装
-pip install aiohttp[speedups] PyGithub rich loguru
-```
-
-## 📚 下一步
-
-- 阅读完整 [README.md](README.md) 了解详细功能
-- 查看 [GITHUB_PUBLISH_GUIDE.md](GITHUB_PUBLISH_GUIDE.md) 学习如何发布项目
-- 自定义 `config.py` 中的搜索策略和正则表达式
-
-## 💡 提示
-
-1. **安全第一**: 永远不要将包含真实 token 的 `config_local.py` 提交到 Git
-2. **多 Token**: 配置多个 GitHub Token 可大幅提升扫描速度
-3. **代理设置**: 在中国大陆建议使用代理以提高稳定性
-4. **数据库**: `leaked_keys.db` 会自动去重，可以多次运行程序积累数据
 
 ---
 
-**遇到问题？** 查看 [Issues](https://github.com/YOUR_USERNAME/github-secret-scanner/issues) 或提交新问题。
+## 🔐 加密导出 (新功能)
+
+### 加密导出
+
+```bash
+python main_optimized.py --export-encrypted keys_encrypted.bin
+```
+
+生成两个文件:
+- `keys_encrypted.bin` - 加密数据
+- `keys_encrypted.bin.key` - 解密密钥
+
+### 解密查看
+
+```bash
+python main_optimized.py --decrypt keys_encrypted.bin --key-file keys_encrypted.bin.key
+```
+
+---
+
+## ⚙️ 配置调整
+
+### 编辑 config.yaml
+
+```yaml
+# 调整并发数
+validator:
+  max_concurrency: 150  # 默认 100
+
+# 调整批量大小
+database:
+  batch_size: 100  # 默认 50
+  flush_interval: 3.0  # 默认 5.0
+
+# 调整扫描参数
+scanner:
+  entropy_threshold: 3.5  # 默认 3.8
+  max_file_size_kb: 1000  # 默认 500
+```
+
+---
+
+## 📊 性能对比
+
+运行性能测试:
+
+```bash
+python benchmark.py
+```
+
+预期结果:
+```
+=== 性能对比测试 ===
+
+原版 (main.py):
+- 数据库写入: 100 keys/s
+- 队列容量: 1000
+
+优化版 (main_optimized.py):
+- 数据库写入: 400 keys/s (4x)
+- 队列容量: 10000 (10x)
+
+✅ 优化版性能提升显著!
+```
+
+---
+
+## 🔍 常用命令
+
+### 扫描相关
+
+```bash
+# 基础扫描
+python main_optimized.py
+
+# 启用额外扫描源
+python main_optimized.py --pastebin --gist
+
+# 指定扫描时长 (秒)
+timeout 3600 python main_optimized.py  # 扫描 1 小时
+```
+
+### 数据管理
+
+```bash
+# 查看统计
+python main_optimized.py --stats
+
+# 导出有效 Key
+python main_optimized.py --export valid.txt --status valid
+
+# 导出所有 Key
+python main_optimized.py --export all.txt
+
+# 加密导出
+python main_optimized.py --export-encrypted secure.bin
+```
+
+### 数据库操作
+
+```bash
+# 备份数据库
+cp leaked_keys.db leaked_keys.db.backup
+
+# 查看数据库大小
+ls -lh leaked_keys.db
+
+# 清理数据库 (谨慎!)
+rm leaked_keys.db
+```
+
+---
+
+## ⚠️ 常见问题
+
+### Q1: 提示 "未配置 GitHub Tokens"
+
+**A:** 需要配置至少一个 GitHub Token:
+
+```bash
+export GITHUB_TOKENS="ghp_your_token_here"
+```
+
+或创建 `config_local.py` 文件。
+
+### Q2: 提示 "ModuleNotFoundError: No module named 'aiosqlite'"
+
+**A:** 安装缺失依赖:
+
+```bash
+pip install aiosqlite cryptography pyyaml
+```
+
+### Q3: 性能提升不明显
+
+**A:** 检查配置:
+
+```yaml
+# config.yaml
+validator:
+  max_concurrency: 150  # 提升并发
+database:
+  batch_size: 100  # 增大批量
+```
+
+### Q4: 数据库锁定错误
+
+**A:** 确保没有其他进程在使用数据库:
+
+```bash
+# 检查进程
+ps aux | grep main
+
+# 停止其他实例
+pkill -f main_optimized.py
+```
+
+### Q5: Windows 上 uvloop 安装失败
+
+**A:** uvloop 仅支持 Linux/Mac，Windows 会自动跳过:
+
+```bash
+# Windows 用户可以忽略此依赖
+pip install -r requirements.txt  # 会自动跳过 uvloop
+```
+
+---
+
+## 🎓 进阶使用
+
+### 1. 代理配置
+
+编辑 `config_local.py`:
+
+```python
+PROXY_URL = "http://127.0.0.1:7890"
+```
+
+### 2. 自定义搜索关键词
+
+编辑 `config.py`:
+
+```python
+SEARCH_KEYWORDS = [
+    "openai api key",
+    "anthropic api key",
+    "your custom keyword",
+]
+```
+
+### 3. 调整熵值阈值
+
+编辑 `config.yaml`:
+
+```yaml
+scanner:
+  entropy_threshold: 3.5  # 降低阈值发现更多 Key
+```
+
+### 4. 启用性能监控
+
+编辑 `config.yaml`:
+
+```yaml
+monitoring:
+  enable_prometheus: true
+  prometheus_port: 8000
+```
+
+---
+
+## 📈 性能优化建议
+
+### 高性能配置
+
+适用于高性能服务器:
+
+```yaml
+validator:
+  max_concurrency: 200
+  num_workers: 4
+
+database:
+  batch_size: 100
+  flush_interval: 2.0
+
+scanner:
+  async_download_concurrency: 100
+```
+
+### 低资源配置
+
+适用于个人电脑:
+
+```yaml
+validator:
+  max_concurrency: 50
+  num_workers: 1
+
+database:
+  batch_size: 20
+  flush_interval: 10.0
+
+scanner:
+  async_download_concurrency: 30
+```
+
+---
+
+## 🔄 从原版迁移
+
+### 1. 备份数据
+
+```bash
+cp leaked_keys.db leaked_keys.db.backup
+```
+
+### 2. 测试优化版
+
+```bash
+python main_optimized.py --stats
+```
+
+### 3. 正式切换
+
+```bash
+mv main.py main_old.py
+mv main_optimized.py main.py
+```
+
+### 4. 验证功能
+
+```bash
+# 运行 1 分钟测试
+timeout 60 python main.py
+
+# 检查统计
+python main.py --stats
+```
+
+详细迁移指南请查看 `MIGRATION.md`。
+
+---
+
+## 📚 相关文档
+
+- `OPTIMIZATION.md` - 优化详细说明
+- `MIGRATION.md` - 迁移指南
+- `README.md` - 项目说明
+- `config.yaml` - 配置文件
+
+---
+
+## 🆘 获取帮助
+
+### 查看帮助
+
+```bash
+python main_optimized.py --help
+```
+
+### 检查日志
+
+```bash
+# 查看最近日志
+tail -f scanner.log
+
+# 搜索错误
+grep ERROR scanner.log
+```
+
+### 报告问题
+
+遇到问题请在 GitHub Issues 报告,包含:
+1. 错误信息
+2. 运行环境 (Python 版本, OS)
+3. 配置文件内容
+4. 日志片段
+
+---
+
+## ✅ 快速检查清单
+
+启动前检查:
+
+- [ ] 已安装所有依赖
+- [ ] 已配置 GitHub Token
+- [ ] 数据库文件可写
+- [ ] 网络连接正常
+- [ ] (可选) 已配置代理
+
+---
+
+**快速开始完成!**
+
+现在你可以开始使用优化版扫描器了。
+
+如需更多帮助,请查看 `OPTIMIZATION.md` 和 `MIGRATION.md`。

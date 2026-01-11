@@ -1,0 +1,226 @@
+# GitHub Secret Scanner Pro - 配置文件
+# 外部化配置,便于调整参数
+
+# ============================================================================
+#                          扫描器配置
+# ============================================================================
+scanner:
+  # 熵值阈值 (低于此值的 Key 视为测试数据)
+  entropy_threshold: 3.8
+
+  # 最大文件大小 (KB)
+  max_file_size_kb: 500
+
+  # 异步下载并发数
+  async_download_concurrency: 60
+
+  # 上下文窗口 (前后各 N 行)
+  context_window: 10
+
+# ============================================================================
+#                          验证器配置
+# ============================================================================
+validator:
+  # 最大并发数
+  max_concurrency: 100
+
+  # 请求超时 (秒)
+  request_timeout: 15
+
+  # 工作线程数
+  num_workers: 2
+
+# ============================================================================
+#                          数据库配置
+# ============================================================================
+database:
+  # 数据库路径
+  db_path: "leaked_keys.db"
+
+  # 批量写入大小
+  batch_size: 50
+
+  # 刷新间隔 (秒)
+  flush_interval: 5.0
+
+# ============================================================================
+#                          熔断器配置
+# ============================================================================
+circuit_breaker:
+  # 是否启用
+  enabled: true
+
+  # 连续失败次数阈值
+  failure_threshold: 5
+
+  # 熔断恢复时间 (秒)
+  recovery_timeout: 60
+
+  # 半开状态允许的试探请求数
+  half_open_requests: 3
+
+# ============================================================================
+#                          域名黑名单
+# ============================================================================
+blacklist:
+  domains:
+    - localhost
+    - 127.0.0.1
+    - 0.0.0.0
+    - example.com
+    - test.com
+    - my-api
+    - your-api
+    - xxx
+    - placeholder
+    - fake
+    - dummy
+    - sample
+    - mock
+    - staging.
+    - sandbox.
+    - dev.
+    - demo.
+    - test.
+    - .local
+    - .internal
+    - ngrok.io
+    - localtunnel
+
+  paths:
+    - /test/
+    - /tests/
+    - /__tests__/
+    - /spec/
+    - /specs/
+    - /mock/
+    - /mocks/
+    - /__mocks__/
+    - /fixture/
+    - /fixtures/
+    - /example/
+    - /examples/
+    - /sample/
+    - /samples/
+    - /demo/
+    - /demos/
+    - /doc/
+    - /docs/
+    - /vendor/
+    - /node_modules/
+    - /venv/
+    - /.venv/
+    - /dist/
+    - /build/
+    - /out/
+    - /coverage/
+    - /.github/ISSUE_TEMPLATE/
+    - /sandbox/
+    - /playground/
+    - /staging/
+    - /tutorial/
+    - /tutorials/
+    - /workshop/
+    - /workshops/
+    - /boilerplate/
+    - /starter/
+
+# ============================================================================
+#                          文件扩展名过滤
+# ============================================================================
+file_filter:
+  # 允许的扩展名
+  allowed_extensions:
+    - .py
+    - .js
+    - .ts
+    - .jsx
+    - .tsx
+    - .env
+    - .env.local
+    - .env.production
+    - .env.development
+    - .yml
+    - .yaml
+    - .toml
+    - .sh
+    - .bash
+    - .zsh
+    - .php
+    - .rb
+    - .go
+    - .rs
+    - .java
+    - .conf
+    - .cfg
+    - .ini
+    - .dockerfile
+
+  # 必须屏蔽的扩展名
+  blocked_extensions:
+    - .lock
+    - .min.js
+    - .min.css
+    - .map
+    - .md
+    - .rst
+    - .txt
+    - .html
+    - .htm
+    - .css
+    - .scss
+    - .less
+    - .svg
+    - .png
+    - .jpg
+    - .jpeg
+    - .gif
+    - .ico
+    - .woff
+    - .woff2
+    - .ttf
+    - .eot
+    - .pdf
+    - .doc
+    - .docx
+    - .xls
+    - .xlsx
+    - .zip
+    - .tar
+    - .gz
+    - .rar
+    - .exe
+    - .dll
+    - .so
+    - .dylib
+    - .pyc
+    - .pyo
+    - .class
+    - .ipynb
+    - .csv
+
+# ============================================================================
+#                          性能监控
+# ============================================================================
+monitoring:
+  # 是否启用 Prometheus 指标
+  enable_prometheus: false
+
+  # Prometheus 端口
+  prometheus_port: 8000
+
+  # 统计输出间隔 (秒)
+  stats_interval: 60
+
+# ============================================================================
+#                          日志配置
+# ============================================================================
+logging:
+  # 日志级别 (DEBUG/INFO/WARNING/ERROR)
+  level: INFO
+
+  # 是否输出到文件
+  log_to_file: false
+
+  # 日志文件路径
+  log_file: "scanner.log"
