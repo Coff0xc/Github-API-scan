@@ -1,0 +1,32 @@
+# GitHub Secret Scanner Pro - 本地配置文件
+# 此文件用于覆盖 config.py 的默认设置
+# 建议将真实的 token 和敏感配置放在此文件中
+# ⚠️ 注意：此文件已被 .gitignore 忽略，不会被提交到 Git
+
+"""
+使用方法：
+在项目根目录创建此文件，并填入你的配置。
+程序会自动导入此文件覆盖默认配置。
+"""
+
+# GitHub Personal Access Tokens
+# 获取方式: https://github.com/settings/tokens
+# 需要权限: public_repo
+GITHUB_TOKENS = [
+    "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "ghp_yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+    # 添加更多 token 以提高扫描速度...
+]
+
+# 代理设置（可选）
+# 留空表示不使用代理
+PROXY_URL = ""  # 例如: "http://127.0.0.1:7890"
+
+# 数据库文件路径
+DB_PATH = "leaked_keys.db"
+
+# 验证器线程数
+CONSUMER_THREADS = 20
+
+# HTTP 请求超时（秒）
+REQUEST_TIMEOUT = 15

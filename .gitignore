@@ -1,0 +1,59 @@
+# Git ignore file
+# Prevent sensitive data from being committed
+
+# Database files (contains scanned keys)
+*.db
+leaked_keys.db
+*.sqlite
+*.sqlite3
+
+# Configuration files with tokens/keys
+config_local.py
+*_local.py
+.env
+.env.*
+!.env.example
+
+# Scan results
+*_keys.txt
+*_keys.csv
+valid_keys*.txt
+results*.txt
+scan_*.log
+monitor*.log
+found_keys.txt
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+logs/
+*.out
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.bak
