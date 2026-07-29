@@ -36,7 +36,7 @@ class KeyStatus(Enum):
 class LeakedKey:
     """
     泄露密钥数据模型
-    
+
     核心字段：
     - api_key: API 密钥（唯一索引）
     - base_url: 绑定的 API 地址（解决 401 的关键）
@@ -44,19 +44,47 @@ class LeakedKey:
     - model_tier: 模型阶梯 (GPT-4/GPT-3.5)
     - rpm: 速率限制
     - is_high_value: 是否高价值 Key
+
+    深度验证字段（P4）：
+    - balance_usd: 余额（美元）
+    - used_quota_usd: 已用额度
+    - total_quota_usd: 总额度
+    - tpm: Tokens per minute
+    - rpd: Requests per day
+    - has_gpt4, has_gpt5, has_claude_opus: 模型访问权限
+    - organization, account_name: 账户信息
+    - expiration_date: 到期时间
+    - key_type: 密钥类型
+    - value_score: 价值评分 (0-100)
     """
     platform: str           # openai, azure, gemini, anthropic
     api_key: str            # API Key
     base_url: str           # 绑定的 Base URL
     status: str = KeyStatus.PENDING.value
-    balance: str = ""       # 余额/模型信息
+    balance: str = ""       # 余额/模型信息（保留向后兼容）
     source_url: str = ""    # GitHub 来源链接
     model_tier: str = ""    # 模型阶梯: GPT-4, GPT-3.5, Gemini-Pro 等
     rpm: int = 0            # Rate Per Minute
     is_high_value: bool = False  # 是否高价值 Key
+
+    # 深度验证字段
+    balance_usd: float = 0.0      # 余额（USD）
+    used_quota_usd: float = 0.0   # 已用额度
+    total_quota_usd: float = 0.0  # 总额度
+    tpm: int = 0                  # Tokens per minute
+    rpd: int = 0                  # Requests per day
+    has_gpt4: bool = False        # GPT-4 访问权限
+    has_gpt5: bool = False        # GPT-5 访问权限
+    has_claude_opus: bool = False # Claude Opus 访问权限
+    organization: str = ""        # 组织名称
+    account_name: str = ""        # 账户名称
+    expiration_date: str = ""     # 到期日期
+    key_type: str = ""            # 密钥类型: project/service_account/user
+    value_score: int = 0          # 价值评分 0-100
+
     found_time: datetime = None
     id: int = None
-    
+
     def __post_init__(self):
         if self.found_time is None:
             self.found_time = datetime.now()
@@ -97,7 +125,7 @@ class Database:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 
-                # 创建主表（优化后的结构）
+                # 创建主表（优化后的结构 + 深度验证字段）
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS leaked_keys (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -111,7 +139,22 @@ class Database:
                         rpm INTEGER DEFAULT 0,
                         is_high_value BOOLEAN DEFAULT 0,
                         found_time DATETIME DEFAULT CURRENT_TIMESTAMP,
-                        verified_time DATETIME
+                        verified_time DATETIME,
+
+                        -- 深度验证字段（P4）
+                        balance_usd REAL DEFAULT 0.0,
+                        used_quota_usd REAL DEFAULT 0.0,
+                        total_quota_usd REAL DEFAULT 0.0,
+                        tpm INTEGER DEFAULT 0,
+                        rpd INTEGER DEFAULT 0,
+                        has_gpt4 BOOLEAN DEFAULT 0,
+                        has_gpt5 BOOLEAN DEFAULT 0,
+                        has_claude_opus BOOLEAN DEFAULT 0,
+                        organization TEXT DEFAULT '',
+                        account_name TEXT DEFAULT '',
+                        expiration_date TEXT DEFAULT '',
+                        key_type TEXT DEFAULT '',
+                        value_score INTEGER DEFAULT 0
                     )
                 """)
                 
@@ -128,6 +171,30 @@ class Database:
                     cursor.execute("ALTER TABLE leaked_keys ADD COLUMN is_high_value BOOLEAN DEFAULT 0")
                 except sqlite3.OperationalError:
                     pass
+
+                # 深度验证字段迁移
+                deep_validation_fields = [
+                    ("balance_usd", "REAL DEFAULT 0.0"),
+                    ("used_quota_usd", "REAL DEFAULT 0.0"),
+                    ("total_quota_usd", "REAL DEFAULT 0.0"),
+                    ("tpm", "INTEGER DEFAULT 0"),
+                    ("rpd", "INTEGER DEFAULT 0"),
+                    ("has_gpt4", "BOOLEAN DEFAULT 0"),
+                    ("has_gpt5", "BOOLEAN DEFAULT 0"),
+                    ("has_claude_opus", "BOOLEAN DEFAULT 0"),
+                    ("organization", "TEXT DEFAULT ''"),
+                    ("account_name", "TEXT DEFAULT ''"),
+                    ("expiration_date", "TEXT DEFAULT ''"),
+                    ("key_type", "TEXT DEFAULT ''"),
+                    ("value_score", "INTEGER DEFAULT 0"),
+                ]
+
+                for field_name, field_type in deep_validation_fields:
+                    try:
+                        cursor.execute(f"ALTER TABLE leaked_keys ADD COLUMN {field_name} {field_type}")
+                        logger.info(f"Added new column: {field_name}")
+                    except sqlite3.OperationalError:
+                        pass  # 字段已存在
                 
                 # 创建索引
                 cursor.execute("""
@@ -237,8 +304,8 @@ class Database:
     
     def insert_key(self, key: LeakedKey) -> bool:
         """
-        插入新的泄露密钥
-        
+        插入新的泄露密钥（支持深度验证字段）
+
         Returns:
             插入是否成功（已存在返回 False）
         """
@@ -247,9 +314,12 @@ class Database:
                 cursor = conn.cursor()
                 try:
                     cursor.execute("""
-                        INSERT INTO leaked_keys 
-                        (platform, api_key, base_url, status, balance, source_url, model_tier, rpm, is_high_value, found_time)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        INSERT INTO leaked_keys
+                        (platform, api_key, base_url, status, balance, source_url, model_tier, rpm, is_high_value, found_time,
+                         balance_usd, used_quota_usd, total_quota_usd, tpm, rpd,
+                         has_gpt4, has_gpt5, has_claude_opus, organization, account_name,
+                         expiration_date, key_type, value_score)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
                         key.platform,
                         key.api_key,
@@ -260,7 +330,20 @@ class Database:
                         key.model_tier,
                         key.rpm,
                         1 if key.is_high_value else 0,
-                        key.found_time.isoformat() if key.found_time else datetime.now().isoformat()
+                        key.found_time.isoformat() if key.found_time else datetime.now().isoformat(),
+                        key.balance_usd,
+                        key.used_quota_usd,
+                        key.total_quota_usd,
+                        key.tpm,
+                        key.rpd,
+                        1 if key.has_gpt4 else 0,
+                        1 if key.has_gpt5 else 0,
+                        1 if key.has_claude_opus else 0,
+                        key.organization,
+                        key.account_name,
+                        key.expiration_date,
+                        key.key_type,
+                        key.value_score
                     ))
                     conn.commit()
                     return True
@@ -268,36 +351,70 @@ class Database:
                     return False
     
     def update_key_status(
-        self, 
-        api_key: str, 
+        self,
+        api_key: str,
         status: KeyStatus,
         balance: str = "",
         model_tier: str = "",
         rpm: int = 0,
-        is_high_value: bool = False
+        is_high_value: bool = False,
+        # 深度验证参数
+        balance_usd: float = 0.0,
+        used_quota_usd: float = 0.0,
+        total_quota_usd: float = 0.0,
+        tpm: int = 0,
+        rpd: int = 0,
+        has_gpt4: bool = False,
+        has_gpt5: bool = False,
+        has_claude_opus: bool = False,
+        organization: str = "",
+        account_name: str = "",
+        expiration_date: str = "",
+        key_type: str = "",
+        value_score: int = 0
     ) -> bool:
         """
-        更新 Key 的验证状态
-        
+        更新 Key 的验证状态（支持深度验证字段）
+
         Args:
             api_key: API Key
             status: 新状态
-            balance: 余额/附加信息
+            balance: 余额/附加信息（向后兼容）
             model_tier: 模型阶梯
             rpm: RPM 限制
             is_high_value: 是否高价值
+            balance_usd: 余额（美元）
+            used_quota_usd: 已用额度
+            total_quota_usd: 总额度
+            tpm: Tokens per minute
+            rpd: Requests per day
+            has_gpt4, has_gpt5, has_claude_opus: 模型访问权限
+            organization: 组织名称
+            account_name: 账户名称
+            expiration_date: 到期日期
+            key_type: 密钥类型
+            value_score: 价值评分
         """
         with self._lock:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
-                    UPDATE leaked_keys 
-                    SET status = ?, balance = ?, model_tier = ?, rpm = ?, is_high_value = ?, verified_time = ?
+                    UPDATE leaked_keys
+                    SET status = ?, balance = ?, model_tier = ?, rpm = ?, is_high_value = ?, verified_time = ?,
+                        balance_usd = ?, used_quota_usd = ?, total_quota_usd = ?, tpm = ?, rpd = ?,
+                        has_gpt4 = ?, has_gpt5 = ?, has_claude_opus = ?,
+                        organization = ?, account_name = ?, expiration_date = ?, key_type = ?, value_score = ?
                     WHERE api_key = ?
                 """, (
-                    status.value, balance, model_tier, rpm, 
-                    1 if is_high_value else 0, 
-                    datetime.now().isoformat(), api_key
+                    status.value, balance, model_tier, rpm,
+                    1 if is_high_value else 0,
+                    datetime.now().isoformat(),
+                    balance_usd, used_quota_usd, total_quota_usd, tpm, rpd,
+                    1 if has_gpt4 else 0,
+                    1 if has_gpt5 else 0,
+                    1 if has_claude_opus else 0,
+                    organization, account_name, expiration_date, key_type, value_score,
+                    api_key
                 ))
                 conn.commit()
                 return cursor.rowcount > 0

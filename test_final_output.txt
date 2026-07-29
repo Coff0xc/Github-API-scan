@@ -1,0 +1,123 @@
+[32m2026-07-29 11:26:55.755[0m | [1mINFO    [0m | [36mdatabase[0m:[36m_init_db[0m:[36m159[0m - [1mÊı¾İ¿â³õÊ¼»¯Íê³É: test_base_url_pairing.db (ÒÑÉ¨ÃèÎÄ¼ş: 0, ÒÑÈë¿â Key: 0)[0m
+[32m2026-07-29 11:26:55.760[0m | [34m[1mDEBUG   [0m | [36mvalidator[0m:[36mvalidate_openai[0m:[36m444[0m - [34m[1mÑéÖ¤ OpenAI key sk-test12345678..., base_url: https://api.openai.com/v1[0m
+[32m2026-07-29 11:26:58.160[0m | [34m[1mDEBUG   [0m | [36mvalidator[0m:[36mvalidate_openai[0m:[36m444[0m - [34m[1mÑéÖ¤ OpenAI key sk-relay1234567..., base_url: https://api.relay-station.com/v1[0m
+[32m2026-07-29 11:26:58.287[0m | [34m[1mDEBUG   [0m | [36mvalidator[0m:[36mvalidate_openai[0m:[36m444[0m - [34m[1mÑéÖ¤ OpenAI key sk-or-v1-abcd12..., base_url: https://openrouter.ai/api/v1[0m
+[32m2026-07-29 11:26:58.546[0m | [34m[1mDEBUG   [0m | [36mvalidator[0m:[36mvalidate_gemini[0m:[36m558[0m - [34m[1mÑéÖ¤ Gemini key AIzaSyTest12345..., base_url: https://generativelanguage.googleapis.com/v1beta[0m
+[32m2026-07-29 11:26:58.825[0m | [34m[1mDEBUG   [0m | [36mvalidator[0m:[36mvalidate_gemini[0m:[36m558[0m - [34m[1mÑéÖ¤ Gemini key AIzaSyTest12345..., base_url: https://gemini-proxy.example.com/v1beta[0m
+[WARNING] GitHub Tokens not configured!
+   Please create config_local.py file or set GITHUB_TOKENS environment variable
+   Reference: config_local.py.example
+
+================================================================================
+Base URL Åä¶Ô²âÊÔ
+================================================================================
+
+[²âÊÔ 1/7] ¹Ù·½ OpenAI - Ä¬ÈÏ URL
+  ÃèÊö: ²âÊÔ¿Õ base_url Ê±ÊÇ·ñÕıÈ·Ê¹ÓÃÄ¬ÈÏ¹Ù·½ URL
+  Æ½Ì¨: openai
+  API Key: sk-test1234567890abc...
+  Base URL: (¿Õ£¬Ê¹ÓÃÄ¬ÈÏ)
+  ½á¹û: invalid
+  ĞÅÏ¢: ÈÏÖ¤Ê§°Ü
+  [OK] Í¨¹ı£¨×´Ì¬: invalid£©
+
+[²âÊÔ 2/7] ÖĞ×ªÕ¾ OpenAI - ×Ô¶¨Òå URL
+  ÃèÊö: ²âÊÔÊÇ·ñÊ¹ÓÃ×Ô¶¨ÒåÖĞ×ªÕ¾ base_url
+  Æ½Ì¨: openai
+  API Key: sk-relay1234567890ab...
+  Base URL: https://api.relay-station.com/v1
+  ½á¹û: connection_error
+  ĞÅÏ¢: Á¬½ÓÊ§°Ü
+  [OK] Í¨¹ı£¨×´Ì¬: connection_error£©
+
+[²âÊÔ 3/7] OpenRouter - ¾ÛºÏ·şÎñ
+  ÃèÊö: ²âÊÔ OpenRouter ¾ÛºÏ·şÎñµÄ base_url Åä¶Ô
+  Æ½Ì¨: openai
+  API Key: sk-or-v1-abcd1234567...
+  Base URL: https://openrouter.ai/api/v1
+  ½á¹û: valid
+  ĞÅÏ¢: 367Ä£ĞÍ: qwen/qwen3.7-fl, anthropic/claud, anthropic/claud
+  [FAIL] Ê§°Ü£¨Ô¤ÆÚ: invalid, Êµ¼Ê: valid£©
+
+[²âÊÔ 4/7] Gemini - ¹Ù·½ URL
+  ÃèÊö: ²âÊÔ Gemini Ä¬ÈÏ URL
+  Æ½Ì¨: gemini
+  API Key: AIzaSyTest1234567890...
+  Base URL: (¿Õ£¬Ê¹ÓÃÄ¬ÈÏ)
+  ½á¹û: invalid
+  ĞÅÏ¢: HTTP 400
+  [OK] Í¨¹ı£¨×´Ì¬: invalid£©
+
+[²âÊÔ 5/7] Gemini - ×Ô¶¨Òå´úÀí
+  ÃèÊö: ²âÊÔ Gemini ×Ô¶¨Òå´úÀí URL
+  Æ½Ì¨: gemini
+  API Key: AIzaSyTest1234567890...
+  Base URL: https://gemini-proxy.example.com/v1beta
+  ½á¹û: connection_error
+  ĞÅÏ¢: GeminiÁ¬½ÓÊ§°Ü
+  [OK] Í¨¹ı£¨×´Ì¬: connection_error£©
+
+[²âÊÔ 6/7] Azure OpenAI - ±ØĞè endpoint
+  ÃèÊö: ²âÊÔ Azure endpoint ±ØĞèĞÔ
+  Æ½Ì¨: azure
+  API Key: abc123def45678901234...
+  Base URL: https://my-resource.openai.azure.com
+  ½á¹û: connection_error
+  ĞÅÏ¢: AzureÁ¬½ÓÊ§°Ü
+  [OK] Í¨¹ı£¨×´Ì¬: connection_error£©
+
+[²âÊÔ 7/7] Azure OpenAI - È±Ê§ endpoint
+  ÃèÊö: ²âÊÔ Azure È±Ê§ endpoint Ê±Ó¦·µ»Ø UNVERIFIED
+  Æ½Ì¨: azure
+  API Key: abc123def45678901234...
+  Base URL: (¿Õ£¬Ê¹ÓÃÄ¬ÈÏ)
+  ½á¹û: unverified
+  ĞÅÏ¢: È±ÉÙEndpoint
+  [OK] Í¨¹ı£¨×´Ì¬: unverified£©
+
+================================================================================
+²âÊÔÍê³É: Í¨¹ı 6/7, Ê§°Ü 1/7
+================================================================================
+
+×¢Òâ£º
+- ÓÉÓÚÊ¹ÓÃ²âÊÔÃÜÔ¿£¬Ô¤ÆÚ´ó²¿·Ö»á·µ»Ø INVALID »ò CONNECTION_ERROR
+- ¹Ø¼üÊÇ¼ì²éÈÕÖ¾ÖĞÊÇ·ñÊ¹ÓÃÁËÕıÈ·µÄ base_url
+- ²é¿´ÈÕÖ¾Êä³ö£¬È·ÈÏ 'ÑéÖ¤ XXX key ..., base_url: ...' ĞÅÏ¢
+
+================================================================================
+ÕæÊµ³¡¾°²âÊÔ£º´Ó´úÂëÉÏÏÂÎÄÌáÈ¡ base_url
+================================================================================
+
+³¡¾° 1: .env ÎÄ¼şÅäÖÃ
+
+# OpenAI API Configuration
+OPENAI_API_KEY=sk-abc1234567890xyz
+OPENAI_BASE_URL=https://api.relay-station.com/v1
+
+Ô¤ÆÚ: Ó¦ÌáÈ¡ base_url = https://api.relay-station.com/v1
+
+³¡¾° 2: Python ´úÂëÅäÖÃ
+
+import openai
+openai.api_key = "sk-def9876543210uvw"
+openai.api_base = "https://openrouter.ai/api/v1"
+
+Ô¤ÆÚ: Ó¦ÌáÈ¡ base_url = https://openrouter.ai/api/v1
+
+³¡¾° 3: JavaScript ´úÂëÅäÖÃ
+
+const openai = new OpenAI({
+    apiKey: 'sk-ghi5555555555zzz',
+    baseURL: 'https://api.custom-proxy.io/v1',
+});
+
+Ô¤ÆÚ: Ó¦ÌáÈ¡ base_url = https://api.custom-proxy.io/v1
+
+ÌáÊ¾: ÔËĞĞÍêÕûÉ¨ÃèÊ±£¬scanner »á×Ô¶¯ÌáÈ¡ÕâĞ© base_url
+
+================================================================================
+ÏÂÒ»²½£º
+1. ¼ì²éÉÏ·½ÈÕÖ¾Êä³ö£¬È·ÈÏÃ¿¸ö²âÊÔÊ¹ÓÃÁËÕıÈ·µÄ base_url
+2. Èç¹ûÒª²âÊÔÕæÊµÃÜÔ¿£¬ÇëĞŞ¸Ä TEST_CASES ÖĞµÄ api_key ºÍ base_url
+3. ÔËĞĞÍêÕûÉ¨Ãè: python main_v2.2.py
+================================================================================
