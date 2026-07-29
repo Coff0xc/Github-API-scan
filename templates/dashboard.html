@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Key Scanner - Dashboard</title>
+    <link rel="stylesheet" href="/static/css/dashboard.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header>
+            <h1>🔍 API Key Scanner Dashboard</h1>
+            <div class="status" id="status">
+                <span class="status-indicator"></span>
+                <span id="status-text">Idle</span>
+            </div>
+        </header>
+
+        <!-- Stats Cards -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-label">Total Keys</div>
+                <div class="stat-value" id="total-keys">0</div>
+            </div>
+            <div class="stat-card valid">
+                <div class="stat-label">Valid Keys</div>
+                <div class="stat-value" id="valid-keys">0</div>
+            </div>
+            <div class="stat-card high-value">
+                <div class="stat-label">High Value</div>
+                <div class="stat-value" id="high-value-keys">0</div>
+            </div>
+            <div class="stat-card invalid">
+                <div class="stat-label">Invalid</div>
+                <div class="stat-value" id="invalid-keys">0</div>
+            </div>
+        </div>
+
+        <!-- Charts -->
+        <div class="charts-grid">
+            <div class="chart-card">
+                <h3>Platform Distribution</h3>
+                <canvas id="platformChart"></canvas>
+            </div>
+            <div class="chart-card">
+                <h3>Status Breakdown</h3>
+                <canvas id="statusChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Filters and Search -->
+        <div class="controls">
+            <div class="filter-group">
+                <label>Status:</label>
+                <select id="filter-status">
+                    <option value="">All</option>
+                    <option value="valid">Valid</option>
+                    <option value="invalid">Invalid</option>
+                    <option value="quota_exceeded">Quota Exceeded</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>Platform:</label>
+                <select id="filter-platform">
+                    <option value="">All</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <input type="text" id="search-input" placeholder="Search keys or URLs...">
+            </div>
+            <button id="export-btn" class="btn-export">📥 Export</button>
+        </div>
+
+        <!-- Keys Table -->
+        <div class="table-container">
+            <table id="keys-table">
+                <thead>
+                    <tr>
+                        <th>Platform</th>
+                        <th>API Key</th>
+                        <th>Status</th>
+                        <th>Info</th>
+                        <th>Source</th>
+                        <th>Found Time</th>
+                    </tr>
+                </thead>
+                <tbody id="keys-tbody">
+                    <tr>
+                        <td colspan="6" class="loading">Loading...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Pagination -->
+        <div class="pagination">
+            <button id="prev-btn" disabled>← Previous</button>
+            <span id="page-info">Page 1</span>
+            <button id="next-btn">Next →</button>
+        </div>
+    </div>
+
+    <script src="/static/js/dashboard.js"></script>
+</body>
+</html>
