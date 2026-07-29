@@ -435,14 +435,18 @@ class AsyncValidator:
     
     async def validate_openai(self, api_key: str, base_url: str) -> ValidationResult:
         """异步验证 OpenAI / 中转站 - 集成熍断器保护"""
-        
-        # ========== 新增：预检查 base_url 有效性 ==========
-        if not self._is_likely_valid_relay(base_url):
-            return ValidationResult(KeyStatus.INVALID, "base_url 无效")
-        
+
+        # ========== 修复：先设置默认值，再检查有效性 ==========
         if not base_url:
             base_url = config.default_base_urls["openai"]
-        
+
+        # 记录验证信息（用于调试）
+        logger.debug(f"验证 OpenAI key {api_key[:15]}..., base_url: {base_url}")
+
+        # 预检查 base_url 有效性
+        if not self._is_likely_valid_relay(base_url):
+            return ValidationResult(KeyStatus.INVALID, "base_url 无效")
+
         # 熍断器检查
         circuit_result = await self._check_circuit_breaker(base_url)
         if circuit_result:
@@ -547,9 +551,15 @@ class AsyncValidator:
     
     async def validate_gemini(self, api_key: str, base_url: str) -> ValidationResult:
         """异步验证 Gemini - 集成熍断器保护"""
-        url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
-        
-        # 熍断器检查（Gemini 域名在白名单中，不会被熍断）
+        # ========== 修复：支持自定义 base_url ==========
+        if not base_url:
+            base_url = config.default_base_urls.get("gemini", "https://generativelanguage.googleapis.com/v1beta")
+
+        logger.debug(f"验证 Gemini key {api_key[:15]}..., base_url: {base_url}")
+
+        url = f"{base_url.rstrip('/')}/models?key={api_key}"
+
+        # 熍断器检查
         circuit_result = await self._check_circuit_breaker(url)
         if circuit_result:
             return circuit_result
@@ -1184,6 +1194,346 @@ class AsyncValidator:
             logger.debug(f"GitHub 验证异常: {e}")
         return ValidationResult(KeyStatus.CONNECTION_ERROR, "连接失败")
 
+    # ========================================================================
+    #                      Chinese AI Platform Validators
+    # ========================================================================
+
+    async def validate_moonshot(self, api_key: str, base_url: str) -> ValidationResult:
+        """验证 Moonshot AI (Kimi) API Key"""
+        if not base_url:
+            base_url = "https://api.moonshot.cn/v1"
+
+        headers = {"Authorization": f"Bearer {api_key}"}
+        session = await self._get_session()
+        proxy = self._get_proxy()
+
+        try:
+            async with session.get(
+                f"{base_url.rstrip('/')}/models",
+                headers=headers, proxy=proxy
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    models = data.get("data", [])
+                    return ValidationResult(KeyStatus.VALID, f"Moonshot 有效 ({len(models)}模型)")
+                elif resp.status == 401:
+                    return ValidationResult(KeyStatus.INVALID, "无效")
+                elif resp.status == 429:
+                    return ValidationResult(KeyStatus.QUOTA_EXCEEDED, "配额耗尽")
+        except Exception as e:
+            logger.debug(f"Moonshot 验证异常: {e}")
+        return ValidationResult(KeyStatus.CONNECTION_ERROR, "连接失败")
+
+    async def validate_zhipu(self, api_key: str, base_url: str) -> ValidationResult:
+        """验证 Zhipu AI (智谱) API Key"""
+        if not base_url:
+            base_url = "https://open.bigmodel.cn/api/paas/v4"
+
+        headers = {"Authorization": f"Bearer {api_key}"}
+        session = await self._get_session()
+        proxy = self._get_proxy()
+
+        try:
+            async with session.get(
+                f"{base_url.rstrip('/')}/models",
+                headers=headers, proxy=proxy
+            ) as resp:
+                if resp.status == 200:
+                    return ValidationResult(KeyStatus.VALID, "Zhipu AI 有效")
+                elif resp.status == 401:
+                    return ValidationResult(KeyStatus.INVALID, "无效")
+                elif resp.status == 429:
+                    return ValidationResult(KeyStatus.QUOTA_EXCEEDED, "配额耗尽")
+        except Exception as e:
+            logger.debug(f"Zhipu 验证异常: {e}")
+        return ValidationResult(KeyStatus.CONNECTION_ERROR, "连接失败")
+
+    async def validate_baichuan(self, api_key: str, base_url: str) -> ValidationResult:
+        """验证 Baichuan AI (百川智能) API Key"""
+        if not base_url:
+            base_url = "https://api.baichuan-ai.com/v1"
+
+        headers = {"Authorization": f"Bearer {api_key}"}
+        session = await self._get_session()
+        proxy = self._get_proxy()
+
+        try:
+            async with session.get(
+                f"{base_url.rstrip('/')}/models",
+                headers=headers, proxy=proxy
+            ) as resp:
+                if resp.status == 200:
+                    return ValidationResult(KeyStatus.VALID, "Baichuan 有效")
+                elif resp.status == 401:
+                    return ValidationResult(KeyStatus.INVALID, "无效")
+                elif resp.status == 429:
+                    return ValidationResult(KeyStatus.QUOTA_EXCEEDED, "配额耗尽")
+        except Exception as e:
+            logger.debug(f"Baichuan 验证异常: {e}")
+        return ValidationResult(KeyStatus.CONNECTION_ERROR, "连接失败")
+
+    async def validate_minimax(self, api_key: str, base_url: str) -> ValidationResult:
+        """验证 MiniMax API Key"""
+        if not base_url:
+            base_url = "https://api.minimax.chat/v1"
+
+        headers = {"Authorization": f"Bearer {api_key}"}
+        session = await self._get_session()
+        proxy = self._get_proxy()
+
+        try:
+            async with session.get(
+                f"{base_url.rstrip('/')}/text/chatcompletion",
+                headers=headers, proxy=proxy
+            ) as resp:
+                if resp.status in [200, 400]:  # 400 means auth passed but request invalid
+                    return ValidationResult(KeyStatus.VALID, "MiniMax 有效")
+                elif resp.status == 401:
+                    return ValidationResult(KeyStatus.INVALID, "无效")
+                elif resp.status == 429:
+                    return ValidationResult(KeyStatus.QUOTA_EXCEEDED, "配额耗尽")
+        except Exception as e:
+            logger.debug(f"MiniMax 验证异常: {e}")
+        return ValidationResult(KeyStatus.CONNECTION_ERROR, "连接失败")
+
+    async def validate_aliyun_bailian(self, api_key: str, base_url: str) -> ValidationResult:
+        """验证阿里云百炼 API Key"""
+        if not base_url:
+            base_url = "https://dashscope.aliyuncs.com/api/v1"
+
+        headers = {"Authorization": f"Bearer {api_key}"}
+        session = await self._get_session()
+        proxy = self._get_proxy()
+
+        try:
+            async with session.get(
+                f"{base_url.rstrip('/')}/services/aigc/text-generation/generation",
+                headers=headers, proxy=proxy
+            ) as resp:
+                if resp.status in [200, 400]:
+                    return ValidationResult(KeyStatus.VALID, "阿里百炼 有效")
+                elif resp.status == 401:
+                    return ValidationResult(KeyStatus.INVALID, "无效")
+                elif resp.status == 429:
+                    return ValidationResult(KeyStatus.QUOTA_EXCEEDED, "配额耗尽")
+        except Exception as e:
+            logger.debug(f"阿里百炼 验证异常: {e}")
+        return ValidationResult(KeyStatus.CONNECTION_ERROR, "连接失败")
+
+    async def validate_volcengine(self, api_key: str, base_url: str) -> ValidationResult:
+        """验证火山引擎 (字节跳动) API Key"""
+        if not base_url:
+            base_url = "https://ark.cn-beijing.volces.com/api/v3"
+
+        headers = {"Authorization": f"Bearer {api_key}"}
+        session = await self._get_session()
+        proxy = self._get_proxy()
+
+        try:
+            async with session.get(
+                f"{base_url.rstrip('/')}/models",
+                headers=headers, proxy=proxy
+            ) as resp:
+                if resp.status == 200:
+                    return ValidationResult(KeyStatus.VALID, "火山引擎 有效")
+                elif resp.status == 401:
+                    return ValidationResult(KeyStatus.INVALID, "无效")
+                elif resp.status == 429:
+                    return ValidationResult(KeyStatus.QUOTA_EXCEEDED, "配额耗尽")
+        except Exception as e:
+            logger.debug(f"火山引擎 验证异常: {e}")
+        return ValidationResult(KeyStatus.CONNECTION_ERROR, "连接失败")
+
+    async def validate_tencent_hunyuan(self, api_key: str, base_url: str) -> ValidationResult:
+        """验证腾讯混元 API Key"""
+        if not base_url:
+            base_url = "https://hunyuan.tencentcloudapi.com"
+
+        headers = {"Authorization": f"Bearer {api_key}"}
+        session = await self._get_session()
+        proxy = self._get_proxy()
+
+        try:
+            async with session.get(
+                f"{base_url.rstrip('/')}/",
+                headers=headers, proxy=proxy
+            ) as resp:
+                if resp.status in [200, 400]:
+                    return ValidationResult(KeyStatus.VALID, "腾讯混元 有效")
+                elif resp.status == 401:
+                    return ValidationResult(KeyStatus.INVALID, "无效")
+                elif resp.status == 429:
+                    return ValidationResult(KeyStatus.QUOTA_EXCEEDED, "配额耗尽")
+        except Exception as e:
+            logger.debug(f"腾讯混元 验证异常: {e}")
+        return ValidationResult(KeyStatus.CONNECTION_ERROR, "连接失败")
+
+    # ========================================================================
+    #                      Cloud Provider AI Validators
+    # ========================================================================
+
+    async def validate_aws_bedrock(self, api_key: str, base_url: str) -> ValidationResult:
+        """验证 AWS Bedrock Access Key (仅格式检查)"""
+        if api_key.startswith('AKIA') and len(api_key) == 20:
+            return ValidationResult(KeyStatus.UNVERIFIED, "AWS Bedrock Key 格式正确")
+        return ValidationResult(KeyStatus.INVALID, "格式错误")
+
+    # ========================================================================
+    #                      AI Aggregator Validators
+    # ========================================================================
+
+    async def validate_openrouter(self, api_key: str, base_url: str) -> ValidationResult:
+        """验证 OpenRouter API Key"""
+        if not base_url:
+            base_url = "https://openrouter.ai/api/v1"
+
+        headers = {"Authorization": f"Bearer {api_key}"}
+        session = await self._get_session()
+        proxy = self._get_proxy()
+
+        try:
+            async with session.get(
+                f"{base_url.rstrip('/')}/models",
+                headers=headers, proxy=proxy
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    models = data.get("data", [])
+                    return ValidationResult(KeyStatus.VALID, f"OpenRouter 有效 ({len(models)}模型)", is_high_value=True)
+                elif resp.status == 401:
+                    return ValidationResult(KeyStatus.INVALID, "无效")
+                elif resp.status == 429:
+                    return ValidationResult(KeyStatus.QUOTA_EXCEEDED, "配额耗尽")
+        except Exception as e:
+            logger.debug(f"OpenRouter 验证异常: {e}")
+        return ValidationResult(KeyStatus.CONNECTION_ERROR, "连接失败")
+
+    async def validate_portkey(self, api_key: str, base_url: str) -> ValidationResult:
+        """验证 Portkey API Key"""
+        if not base_url:
+            base_url = "https://api.portkey.ai/v1"
+
+        headers = {"x-portkey-api-key": api_key}
+        session = await self._get_session()
+        proxy = self._get_proxy()
+
+        try:
+            async with session.get(
+                f"{base_url.rstrip('/')}/models",
+                headers=headers, proxy=proxy
+            ) as resp:
+                if resp.status == 200:
+                    return ValidationResult(KeyStatus.VALID, "Portkey 有效", is_high_value=True)
+                elif resp.status == 401:
+                    return ValidationResult(KeyStatus.INVALID, "无效")
+                elif resp.status == 429:
+                    return ValidationResult(KeyStatus.QUOTA_EXCEEDED, "配额耗尽")
+        except Exception as e:
+            logger.debug(f"Portkey 验证异常: {e}")
+        return ValidationResult(KeyStatus.CONNECTION_ERROR, "连接失败")
+
+    async def validate_litellm(self, api_key: str, base_url: str) -> ValidationResult:
+        """验证 LiteLLM Proxy API Key"""
+        if not base_url:
+            base_url = "http://localhost:4000"
+
+        headers = {"Authorization": f"Bearer {api_key}"}
+        session = await self._get_session()
+        proxy = self._get_proxy()
+
+        try:
+            async with session.get(
+                f"{base_url.rstrip('/')}/models",
+                headers=headers, proxy=proxy
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    models = data.get("data", [])
+                    return ValidationResult(KeyStatus.VALID, f"LiteLLM 有效 ({len(models)}模型)", is_high_value=True)
+                elif resp.status == 401:
+                    return ValidationResult(KeyStatus.INVALID, "无效")
+                elif resp.status == 429:
+                    return ValidationResult(KeyStatus.QUOTA_EXCEEDED, "配额耗尽")
+        except Exception as e:
+            logger.debug(f"LiteLLM 验证异常: {e}")
+        return ValidationResult(KeyStatus.CONNECTION_ERROR, "连接失败")
+
+    async def validate_cloudflare_ai(self, api_key: str, base_url: str) -> ValidationResult:
+        """验证 Cloudflare Workers AI API Key"""
+        if not base_url:
+            return ValidationResult(KeyStatus.UNVERIFIED, "需要 account_id")
+
+        headers = {"Authorization": f"Bearer {api_key}"}
+        session = await self._get_session()
+        proxy = self._get_proxy()
+
+        try:
+            async with session.get(
+                base_url.rstrip('/'),
+                headers=headers, proxy=proxy
+            ) as resp:
+                if resp.status in [200, 400]:
+                    return ValidationResult(KeyStatus.VALID, "Cloudflare AI 有效")
+                elif resp.status == 401:
+                    return ValidationResult(KeyStatus.INVALID, "无效")
+                elif resp.status == 429:
+                    return ValidationResult(KeyStatus.QUOTA_EXCEEDED, "配额耗尽")
+        except Exception as e:
+            logger.debug(f"Cloudflare AI 验证异常: {e}")
+        return ValidationResult(KeyStatus.CONNECTION_ERROR, "连接失败")
+
+    # ========================================================================
+    #                      New International AI Platforms
+    # ========================================================================
+
+    async def validate_xai(self, api_key: str, base_url: str) -> ValidationResult:
+        """验证 xAI Grok API Key"""
+        if not base_url:
+            base_url = "https://api.x.ai/v1"
+
+        headers = {"Authorization": f"Bearer {api_key}"}
+        session = await self._get_session()
+        proxy = self._get_proxy()
+
+        try:
+            async with session.get(
+                f"{base_url.rstrip('/')}/models",
+                headers=headers, proxy=proxy
+            ) as resp:
+                if resp.status == 200:
+                    return ValidationResult(KeyStatus.VALID, "xAI Grok 有效", is_high_value=True)
+                elif resp.status == 401:
+                    return ValidationResult(KeyStatus.INVALID, "无效")
+                elif resp.status == 429:
+                    return ValidationResult(KeyStatus.QUOTA_EXCEEDED, "配额耗尽")
+        except Exception as e:
+            logger.debug(f"xAI 验证异常: {e}")
+        return ValidationResult(KeyStatus.CONNECTION_ERROR, "连接失败")
+
+    async def validate_meta_llama(self, api_key: str, base_url: str) -> ValidationResult:
+        """验证 Meta Llama API Key"""
+        if not base_url:
+            base_url = "https://api.meta.ai/v1"
+
+        headers = {"Authorization": f"Bearer {api_key}"}
+        session = await self._get_session()
+        proxy = self._get_proxy()
+
+        try:
+            async with session.get(
+                f"{base_url.rstrip('/')}/models",
+                headers=headers, proxy=proxy
+            ) as resp:
+                if resp.status == 200:
+                    return ValidationResult(KeyStatus.VALID, "Meta Llama 有效", is_high_value=True)
+                elif resp.status == 401:
+                    return ValidationResult(KeyStatus.INVALID, "无效")
+                elif resp.status == 429:
+                    return ValidationResult(KeyStatus.QUOTA_EXCEEDED, "配额耗尽")
+        except Exception as e:
+            logger.debug(f"Meta Llama 验证异常: {e}")
+        return ValidationResult(KeyStatus.CONNECTION_ERROR, "连接失败")
+
     async def validate_aws_access_key(self, api_key: str, base_url: str) -> ValidationResult:
         """验证 AWS Access Key (仅格式检查，不实际调用)"""
         # AWS 验证需要 Secret Key 配对，这里只做格式检查
@@ -1202,7 +1552,36 @@ class AsyncValidator:
             return await self.validate_gemini(result.api_key, result.base_url)
         elif platform == "anthropic":
             return await self.validate_anthropic(result.api_key, result.base_url)
-        # 新兴 AI 平台
+        # AI 聚合器
+        elif platform == "openrouter":
+            return await self.validate_openrouter(result.api_key, result.base_url)
+        elif platform == "portkey":
+            return await self.validate_portkey(result.api_key, result.base_url)
+        elif platform == "litellm":
+            return await self.validate_litellm(result.api_key, result.base_url)
+        elif platform == "cloudflare_ai":
+            return await self.validate_cloudflare_ai(result.api_key, result.base_url)
+        # 中国 AI 平台
+        elif platform == "moonshot":
+            return await self.validate_moonshot(result.api_key, result.base_url)
+        elif platform == "zhipu":
+            return await self.validate_zhipu(result.api_key, result.base_url)
+        elif platform == "baichuan":
+            return await self.validate_baichuan(result.api_key, result.base_url)
+        elif platform == "minimax":
+            return await self.validate_minimax(result.api_key, result.base_url)
+        elif platform == "aliyun_bailian":
+            return await self.validate_aliyun_bailian(result.api_key, result.base_url)
+        elif platform == "volcengine":
+            return await self.validate_volcengine(result.api_key, result.base_url)
+        elif platform == "tencent_hunyuan":
+            return await self.validate_tencent_hunyuan(result.api_key, result.base_url)
+        # 国际新星
+        elif platform == "xai":
+            return await self.validate_xai(result.api_key, result.base_url)
+        elif platform == "meta_llama":
+            return await self.validate_meta_llama(result.api_key, result.base_url)
+        # 国际 AI 平台
         elif platform == "huggingface":
             return await self.validate_huggingface(result.api_key, result.base_url)
         elif platform == "groq":
@@ -1222,6 +1601,8 @@ class AsyncValidator:
         elif platform == "fireworks":
             return await self.validate_fireworks(result.api_key, result.base_url)
         # 云服务商
+        elif platform == "aws_bedrock":
+            return await self.validate_aws_bedrock(result.api_key, result.base_url)
         elif platform == "stripe":
             return await self.validate_stripe(result.api_key, result.base_url)
         elif platform == "github_token":
