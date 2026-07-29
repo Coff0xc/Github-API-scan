@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  scanner:
+    build: .
+    container_name: api-key-scanner
+    volumes:
+      - ./data:/app/data
+      - ./config_local.py:/app/config_local.py:ro
+    environment:
+      - GITHUB_TOKENS=${GITHUB_TOKENS}
+      - PROXY_URL=${PROXY_URL:-}
+      - DB_PATH=/app/data/leaked_keys.db
+    restart: unless-stopped
+    command: python main_v2.2.py
+
+  dashboard:
+    build: .
+    container_name: api-key-dashboard
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - DB_PATH=/app/data/leaked_keys.db
+    restart: unless-stopped
+    command: python web_dashboard.py
+    depends_on:
+      - scanner
+
+networks:
+  default:
+    name: api-scanner-network

@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+*.egg-info/
+dist/
+build/
+
+# Database
+*.db
+*.db-journal
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# Claude workspace
+.claude/
+
+# Test outputs
+test_output.txt
+test_final_output.txt
+test_base_url_pairing.db
+test_dashboard.db
+
+# Documentation (keep in image)
+# *.md
+
+# Config (mount as volume)
+config_local.py
+
+# Data directory
+data/
+
+# Temporary files
+*.tmp
+*.temp
