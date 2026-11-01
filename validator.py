@@ -38,11 +38,11 @@ from database import Database, LeakedKey, KeyStatus
 #                              常量与配置
 # ============================================================================
 
-# 最大并发数
-MAX_CONCURRENCY = 100
+# 最大并发数（可通过 config.yaml validator.max_concurrency 调整）
+MAX_CONCURRENCY = config.validator_max_concurrency
 
-# 请求超时
-REQUEST_TIMEOUT = ClientTimeout(total=15, connect=10)
+# 请求超时（可通过 config.yaml validator.request_timeout 调整）
+REQUEST_TIMEOUT = ClientTimeout(total=config.request_timeout, connect=10)
 
 # 高价值模型列表
 HIGH_VALUE_MODELS = ['gpt-4', 'gpt-4-turbo', 'gpt-4o', 'gpt-4-32k', 'claude-3-opus']

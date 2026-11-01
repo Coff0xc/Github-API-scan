@@ -521,3 +521,178 @@ class OptimizedAsyncValidator:
         stats['batch'] = batch_stats
 
         return stats
+
+
+# ============================================================================
+#                     v2.2: 验证器启动入口（供 main_v2.2 调用）
+# ============================================================================
+
+def _safe_dashboard(dashboard, method: str, *args, **kwargs):
+    """容错调用 Dashboard 方法（不同版本 Dashboard 的 API 有差异）"""
+    if dashboard is None:
+        return
+    try:
+        getattr(dashboard, method)(*args, **kwargs)
+    except Exception:
+        pass
+
+
+async def optimized_validator_worker(
+    result_queue: 'asyncio.Queue',
+    async_db,
+    stop_event,
+    dashboard=None,
+    worker_id: int = 0,
+    cache_config: Optional[CacheConfig] = None,
+    batch_config: Optional[BatchConfig] = None,
+):
+    """
+    v2.2 优化版验证工作协程
+
+    - OpenAI / 中转站 Key 走缓存 + 域名健康度 + 智能重试路径
+    - 其余平台走 validate_key_async 通用分发
+    - 入库使用完整 LeakedKey（修复 ScanResult 直接入队导致
+      批量写入时缺 status/balance 等字段、记录被静默丢弃的问题）
+    """
+    from validator import validate_key_async, CircuitBreaker
+
+    validator = OptimizedAsyncValidator(async_db, dashboard, cache_config, batch_config)
+    await validator.init_cache()
+    circuit_breaker = CircuitBreaker()
+    processed_count = 0
+
+    logger.info(f"[Validator-{worker_id}] v2.2 优化版验证器启动")
+
+    try:
+        while not stop_event.is_set():
+            try:
+                result = await asyncio.wait_for(result_queue.get(), timeout=1.0)
+            except asyncio.TimeoutError:
+                continue
+            except Exception as e:
+                logger.error(f"[Validator-{worker_id}] 队列读取错误: {e}")
+                continue
+
+            try:
+                masked = mask_key(result.api_key)
+                platform = (result.platform or "openai").lower()
+
+                # 第二层去重：验证前检查数据库
+                if await async_db.key_exists(result.api_key):
+                    logger.debug(f"[Validator-{worker_id}] Key 已存在,跳过: {masked}")
+                    _safe_dashboard(dashboard, "increment_stat", "skipped_duplicate")
+                    continue
+
+                # 先入库（pending 状态），由批量写入器落盘
+                await async_db.queue_insert(LeakedKey(
+                    platform=result.platform,
+                    api_key=result.api_key,
+                    base_url=result.base_url,
+                    source_url=getattr(result, "source_url", ""),
+                ))
+
+                # 分发验证
+                if platform in ("openai", "relay"):
+                    vr = await validator.validate_openai(result.api_key, result.base_url or "")
+                    status = vr.status
+                    balance = vr.balance
+                    model_tier = vr.model_tier
+                    rpm = vr.rpm
+                    is_high = vr.is_high_value
+                else:
+                    status, balance, model_tier, rpm, is_high = await validate_key_async(
+                        result.platform,
+                        result.api_key,
+                        result.base_url,
+                        circuit_breaker=circuit_breaker
+                    )
+
+                await async_db.update_key_status(
+                    result.api_key, status, balance, model_tier, rpm, is_high
+                )
+                processed_count += 1
+
+                # UI 反馈
+                source_short = (getattr(result, "source_url", "") or "").rsplit('/', 1)[-1]
+                if status == KeyStatus.VALID:
+                    _safe_dashboard(dashboard, "increment_stat", "valid_keys")
+                    _safe_dashboard(dashboard, "add_valid_key",
+                                    platform=result.platform,
+                                    masked_key=masked,
+                                    balance=balance or model_tier,
+                                    source=source_short,
+                                    is_high_value=is_high)
+                    _safe_dashboard(dashboard, "add_log",
+                                    f"✓ 有效! {model_tier or platform.upper()} {masked}",
+                                    "HIGH" if is_high else "VALID")
+                elif status == KeyStatus.QUOTA_EXCEEDED:
+                    _safe_dashboard(dashboard, "increment_stat", "quota_exceeded")
+                    _safe_dashboard(dashboard, "add_log", f"⚠ 配额耗尽 {masked}", "WARN")
+                elif status == KeyStatus.CONNECTION_ERROR:
+                    _safe_dashboard(dashboard, "increment_stat", "connection_errors")
+                    _safe_dashboard(dashboard, "add_log", f"✗ 连接失败 {masked}", "ERROR")
+                else:
+                    _safe_dashboard(dashboard, "increment_stat", "invalid_keys")
+
+                if processed_count % 10 == 0:
+                    logger.info(f"[Validator-{worker_id}] 已处理 {processed_count} 个 Key")
+
+            except Exception as e:
+                logger.error(f"[Validator-{worker_id}] 验证异常: {e}")
+                _safe_dashboard(dashboard, "add_log", f"[✗] 验证错误: {str(e)[:50]}", "ERROR")
+
+    except asyncio.CancelledError:
+        logger.info(f"[Validator-{worker_id}] 收到取消信号")
+    finally:
+        logger.info(f"[Validator-{worker_id}] 验证器停止,共处理 {processed_count} 个 Key")
+
+
+def start_validators(
+    result_queue: 'asyncio.Queue',
+    async_db,
+    stop_event,
+    dashboard=None,
+    num_workers: int = 2,
+    cache_config: Optional[CacheConfig] = None,
+    batch_config: Optional[BatchConfig] = None,
+):
+    """
+    启动 v2.2 优化版验证器（每个线程内跑独立事件循环）
+
+    Args:
+        result_queue: asyncio.Queue 扫描结果队列
+        async_db: AsyncDatabase 异步数据库
+        stop_event: threading.Event 停止信号
+        dashboard: Dashboard UI 实例
+        num_workers: 验证器线程数
+        cache_config: v2.2 缓存配置
+        batch_config: v2.2 批量验证配置
+
+    Returns:
+        List[threading.Thread]
+    """
+    import threading
+
+    threads = []
+
+    def _run(worker_id: int):
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(
+                optimized_validator_worker(
+                    result_queue, async_db, stop_event,
+                    dashboard=dashboard, worker_id=worker_id,
+                    cache_config=cache_config, batch_config=batch_config
+                )
+            )
+        finally:
+            loop.close()
+
+    for i in range(num_workers):
+        t = threading.Thread(target=_run, args=(i,), daemon=True, name=f"Validator-{i}")
+        t.start()
+        threads.append(t)
+
+    logger.info(f"已启动 {num_workers} 个 v2.2 优化版验证器")
+    return threads

@@ -11,6 +11,7 @@
 
 import re
 import os
+import sys
 import math
 import time
 import queue
@@ -39,16 +40,15 @@ from database import Database, LeakedKey, KeyStatus
 # ============================================================================
 
 # 熵值阈值（低于此值的 Key 视为测试/假数据）
-# 经验值: 3.8 更严格过滤，减少假阳性（测试后可调整至 4.0）
-ENTROPY_THRESHOLD = 3.8
+# 经验值: 3.8 更严格过滤，减少假阳性（可通过 config.yaml scanner.entropy_threshold 调整）
+ENTROPY_THRESHOLD = config.entropy_threshold
 
-# 异步下载配置
-# 并发数从 80 降至 60，降低重试开销，提升稳定性
-ASYNC_DOWNLOAD_CONCURRENCY = 60
+# 异步下载配置（可通过 config.yaml scanner.async_download_concurrency 调整）
+ASYNC_DOWNLOAD_CONCURRENCY = config.download_concurrency
 ASYNC_DOWNLOAD_TIMEOUT = ClientTimeout(total=15, connect=8)
 
-# 文件过滤配置
-MAX_FILE_SIZE_KB = 500  # 最大文件大小 (KB)
+# 文件过滤配置（可通过 config.yaml scanner.max_file_size_kb 调整）
+MAX_FILE_SIZE_KB = config.max_file_size_kb  # 最大文件大小 (KB)
 
 # 允许扫描的文件后缀
 ALLOWED_EXTENSIONS = {
@@ -199,15 +199,27 @@ TEST_KEY_PATTERNS = [
     'add_your', 'fill_in', 'replace_with', 'insert_your',
 ]
 
-# 高熵值假阳性模式（看起来像真 Key 但实际是假的）
-HIGH_ENTROPY_FALSE_POSITIVES = [
-    # Base64 编码的常见字符串
-    'dGVzdA==',  # "test"
-    'ZXhhbXBsZQ==',  # "example"
-    'c2FtcGxl',  # "sample"
-    # UUID 格式（不是 API Key）
-    r'^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$',
-]
+# 高熵假阳性模式已并入 TEST_KEY_PATTERNS / 熵过滤逻辑，此常量已移除（原定义未被引用）
+
+# ---------------------------------------------------------------------------
+# config.yaml 附加黑名单 / 扩展名合并（config._load_yaml_overrides 提供，
+# 合并而非覆盖内置规则）
+# ---------------------------------------------------------------------------
+_extra_domains = getattr(config, "extra_domain_blacklist", None)
+if _extra_domains:
+    DOMAIN_BLACKLIST.extend(d for d in _extra_domains if d not in DOMAIN_BLACKLIST)
+
+_extra_paths = getattr(config, "extra_path_blacklist", None)
+if _extra_paths:
+    PATH_BLACKLIST.extend(p for p in _extra_paths if p not in PATH_BLACKLIST)
+
+_extra_allowed = getattr(config, "extra_allowed_extensions", None)
+if _extra_allowed:
+    ALLOWED_EXTENSIONS.update(e for e in _extra_allowed if e not in ALLOWED_EXTENSIONS)
+
+_extra_blocked = getattr(config, "extra_blocked_extensions", None)
+if _extra_blocked:
+    BLOCKED_EXTENSIONS.update(e for e in _extra_blocked if e not in BLOCKED_EXTENSIONS)
 
 
 # ============================================================================
@@ -409,16 +421,22 @@ class GitHubScanner:
     """
     
     def __init__(
-        self, 
+        self,
         result_queue: queue.Queue,
         db: Database,
         stop_event: threading.Event,
-        dashboard = None  # UI 仪表盘
+        dashboard = None,  # UI 仪表盘
+        target_org: str = "",   # 授权范围限定：org:xxx
+        target_repo: str = ""   # 授权范围限定：repo:owner/name
     ):
         self.result_queue = result_queue
         self.db = db
         self.stop_event = stop_event
         self.dashboard = dashboard
+        self.target_org = target_org
+        self.target_repo = target_repo
+        if target_repo or target_org:
+            self._log(f"搜索范围已限定: {'repo:'+target_repo if target_repo else 'org:'+target_org}", "INFO")
         
         # GitHub 客户端池
         self._github_clients: List[Github] = []
@@ -912,41 +930,41 @@ class GitHubScanner:
 
                     # 提取上下文
                     context = self._extract_context(content_variant, match.start())
-                
-                # 检查 Azure
-                is_azure = self._is_azure_context(context)
-                
-                if is_azure:
-                    azure_endpoint = self._extract_azure_endpoint(context)
-                    base_url = azure_endpoint or ""
-                    actual_platform = "azure"
-                    is_relay = False
-                else:
-                    base_url, is_relay = self._extract_base_url(context, platform)
-                    actual_platform = "relay" if is_relay else platform
-                
-                # URL 黑名单检查
-                should_skip_url, url_reason = self._should_skip_url(base_url)
-                if should_skip_url:
+
+                    # 检查 Azure
+                    is_azure = self._is_azure_context(context)
+
+                    if is_azure:
+                        azure_endpoint = self._extract_azure_endpoint(context)
+                        base_url = azure_endpoint or ""
+                        actual_platform = "azure"
+                        is_relay = False
+                    else:
+                        base_url, is_relay = self._extract_base_url(context, platform)
+                        actual_platform = "relay" if is_relay else platform
+
+                    # URL 黑名单检查
+                    should_skip_url, url_reason = self._should_skip_url(base_url)
+                    if should_skip_url:
+                        self._mark_key_processed(api_key)
+                        self.stats["skipped_blacklist"] += 1
+                        if self.dashboard:
+                            self.dashboard.increment_stat("skipped_blacklist")
+                        self._log(f"跳过 {mask_key(api_key)} (URL: {url_reason})", "SKIP")
+                        continue
+
+                    results.append(ScanResult(
+                        platform=actual_platform,
+                        api_key=api_key,
+                        base_url=base_url,
+                        source_url=source_url,
+                        is_azure=is_azure,
+                        is_relay=is_relay,
+                        context=context
+                    ))
+
                     self._mark_key_processed(api_key)
-                    self.stats["skipped_blacklist"] += 1
-                    if self.dashboard:
-                        self.dashboard.increment_stat("skipped_blacklist")
-                    self._log(f"跳过 {mask_key(api_key)} (URL: {url_reason})", "SKIP")
-                    continue
-                
-                results.append(ScanResult(
-                    platform=actual_platform,
-                    api_key=api_key,
-                    base_url=base_url,
-                    source_url=source_url,
-                    is_azure=is_azure,
-                    is_relay=is_relay,
-                    context=context
-                ))
-                
-                self._mark_key_processed(api_key)
-        
+
         return results
     
     # ========================================================================
@@ -1002,6 +1020,8 @@ class GitHubScanner:
             
             # GitHub Dorks 语法不需要额外的 in:file
             query = keyword if any(x in keyword for x in ['filename:', 'path:', 'language:']) else f"{keyword} in:file"
+            # 授权范围限定（--target-org / --target-repo）
+            query = apply_search_scope(query, self.target_org, self.target_repo)
             client = self._get_github_client()
             code_results = client.search_code(query)
             
@@ -1206,20 +1226,61 @@ class GitHubScanner:
                 self.db.reset_progress()
 
 
+def _maybe_enable_ai_filter():
+    """
+    AI_FILTER_ENABLED=1 时为提取管线挂载 AI 假阳性过滤（opt-in）。
+
+    后端选择（见 docs/AI_ASSISTED_ANALYSIS.md）：
+    - AI_DETECTOR_BACKEND=ollama（默认）: 本地 Ollama，无需 API Key
+    - AI_DETECTOR_BACKEND=openai: OpenAI 兼容 API，
+      需设置 OPENAI_API_KEY（+ 可选 AI_LLM_BASE_URL / AI_LLM_MODEL）
+    """
+    if os.getenv("AI_FILTER_ENABLED", "").strip().lower() not in ("1", "true", "yes"):
+        return
+    try:
+        import ai_scanner_integration as _ai_integration
+        enable_llm = bool(os.getenv("OPENAI_API_KEY")) or \
+            os.getenv("AI_DETECTOR_BACKEND", "ollama").strip().lower() == "ollama"
+        integration = _ai_integration.ScannerAIIntegration(enable_ai=enable_llm)
+        _ai_integration.patch_scanner_with_ai(sys.modules[__name__], integration)
+    except Exception as e:
+        print(f"[WARNING] AI 过滤启用失败，继续使用纯正则管线: {e}")
+
+
+def apply_search_scope(query: str, target_org: str = "", target_repo: str = "") -> str:
+    """
+    将 GitHub 搜索约束到授权范围（org:/repo: 限定符）。
+
+    授权渗透场景下，用 --target-org / --target-repo 把所有搜索查询
+    限定在客户资产范围内，扫描行为与授权边界一一对应。
+    """
+    if target_repo:
+        return f"{query} repo:{target_repo}"
+    if target_org:
+        return f"{query} org:{target_org}"
+    return query
+
+
 def start_scanner(
     result_queue: queue.Queue,
     db: Database,
     stop_event: threading.Event,
     dashboard = None,
-    resume: bool = False
+    resume: bool = False,
+    target_org: str = "",
+    target_repo: str = ""
 ) -> threading.Thread:
     """
     启动扫描器线程
-    
+
     Args:
         resume: 是否从断点续传
+        target_org: 授权范围限定（org:xxx）
+        target_repo: 授权范围限定（repo:owner/name，优先级高于 org）
     """
-    scanner = GitHubScanner(result_queue, db, stop_event, dashboard)
+    _maybe_enable_ai_filter()
+    scanner = GitHubScanner(result_queue, db, stop_event, dashboard,
+                            target_org=target_org, target_repo=target_repo)
     thread = threading.Thread(target=lambda: scanner.run(resume=resume), name="GitHubScanner", daemon=True)
     thread.start()
     return thread

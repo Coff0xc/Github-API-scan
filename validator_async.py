@@ -64,7 +64,14 @@ async def async_validator_worker(
                     continue
 
                 # 先插入数据库 (状态为 pending)
-                await async_db.queue_insert(key)
+                # 注意：必须用完整 LeakedKey 入库——ScanResult 缺 status/balance 等
+                # 字段，直接入队会导致批量落盘时 AttributeError、记录被静默丢弃
+                await async_db.queue_insert(LeakedKey(
+                    platform=key.platform,
+                    api_key=key.api_key,
+                    base_url=key.base_url,
+                    source_url=getattr(key, "source_url", ""),
+                ))
 
                 # 异步验证
                 status, balance, model_tier, rpm, is_high_value = await validate_key_async(

@@ -111,8 +111,8 @@ REGEX_PATTERNS = {
     # Cohere Command R+: co- prefix
     "cohere": r'co-[a-zA-Z0-9]{40,64}',
 
-    # Mistral Large 2: 32-64 characters
-    "mistral": r'[a-zA-Z0-9]{32,64}',
+    # Mistral Large 2: 无前缀 32-64 位，要求边界完整且含大写+数字（降低误报）
+    "mistral": r'(?<![A-Za-z0-9])(?=[A-Za-z0-9]{32,64}(?![A-Za-z0-9]))(?=[A-Za-z0-9]*[0-9])(?=[A-Za-z0-9]*[A-Z])[A-Za-z0-9]{32,64}',
 
     # Together AI: 64-character hexadecimal
     "together": r'[a-fA-F0-9]{64}',
@@ -168,8 +168,8 @@ REGEX_PATTERNS = {
     # Modal (GPU cloud): generic format
     "modal": r'modal-[a-zA-Z0-9]{32,}',
 
-    # RunPod (GPU rental): generic format
-    "runpod": r'[a-zA-Z0-9]{32,64}',
+    # RunPod (GPU rental): 无前缀 32-64 位，要求边界完整且含大写+数字（降低误报）
+    "runpod": r'(?<![A-Za-z0-9])(?=[A-Za-z0-9]{32,64}(?![A-Za-z0-9]))(?=[A-Za-z0-9]*[0-9])(?=[A-Za-z0-9]*[A-Z])[A-Za-z0-9]{32,64}',
 
     # Baseten: 64-character hexadecimal
     "baseten": r'[a-fA-F0-9]{64}',
@@ -184,11 +184,8 @@ REGEX_PATTERNS = {
     #                          Enterprise AI Platforms
     # ============================================================================
 
-    # Cohere Command R+: co- prefix
-    "cohere": r'co-[a-zA-Z0-9]{40,64}',
-
-    # AI21 Labs (Jamba): generic format
-    "ai21": r'[a-zA-Z0-9]{40,64}',
+    # AI21 Labs (Jamba): 无前缀 40-64 位，要求边界完整且含大写+数字（降低误报）
+    "ai21": r'(?<![A-Za-z0-9])(?=[A-Za-z0-9]{40,64}(?![A-Za-z0-9]))(?=[A-Za-z0-9]*[0-9])(?=[A-Za-z0-9]*[A-Z])[A-Za-z0-9]{40,64}',
 
     # Writer (enterprise LLM): wr- prefix
     "writer": r'wr-[a-zA-Z0-9]{32,}',
@@ -327,6 +324,27 @@ class Config:
 
     # ==================== Scan Configuration ====================
     context_window: int = 10  # Context window (N lines before/after)
+
+    # ==================== config.yaml 可调参数 ====================
+    # 默认值与 config.yaml 保持一致；模块底部 _load_yaml_overrides()
+    # 会在文件存在时用 config.yaml 的值覆盖这些字段。
+    entropy_threshold: float = 3.8       # 低熵过滤阈值 (scanner)
+    max_file_size_kb: int = 500          # 最大扫描文件大小 (scanner)
+    download_concurrency: int = 60       # 异步下载并发数 (scanner)
+
+    validator_max_concurrency: int = 100 # 验证器最大并发 (validator)
+    validator_workers: int = 0           # 验证器线程数；0 = 使用入口默认值
+
+    db_batch_size: int = 50              # 异步数据库批量写入大小
+    db_flush_interval: float = 5.0       # 异步数据库刷新间隔（秒）
+
+    enable_prometheus: bool = False      # 监控
+    prometheus_port: int = 8000
+    stats_interval: int = 60
+
+    log_level: str = "INFO"              # 日志
+    log_to_file: bool = False
+    log_file: str = "scanner.log"
 
     # Search keywords - 2026 High-Precision Sniper Mode v3.0
     # Strategy: Precise filename + new platform coverage + exclude test files
@@ -598,6 +616,110 @@ class Config:
 
 # Global configuration instance
 config = Config()
+
+
+# ============================================================================
+#                  config.yaml 外部配置加载（官方调参入口）
+# ============================================================================
+# config.yaml 存在时，以下字段会被其覆盖（优先级：内置默认 < config.yaml <
+# config_local.py < 命令行参数）。文件缺失或字段缺失时保持默认值。
+# 可用环境变量 SCANNER_CONFIG 指定其他配置文件路径。
+
+def _load_yaml_overrides() -> None:
+    cfg_path = os.getenv("SCANNER_CONFIG", "config.yaml")
+    if not os.path.exists(cfg_path):
+        return
+    try:
+        import yaml
+        with open(cfg_path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+    except Exception as e:
+        print(f"[WARNING] config.yaml 解析失败，使用内置默认值: {e}")
+        return
+
+    def _section(name: str) -> dict:
+        v = data.get(name)
+        return v if isinstance(v, dict) else {}
+
+    def _num(section: dict, key: str):
+        v = section.get(key)
+        return v if isinstance(v, (int, float)) else None
+
+    # ---- scanner ----
+    s = _section("scanner")
+    if _num(s, "entropy_threshold") is not None:
+        config.entropy_threshold = float(s["entropy_threshold"])
+    if _num(s, "max_file_size_kb") is not None:
+        config.max_file_size_kb = int(s["max_file_size_kb"])
+    if _num(s, "async_download_concurrency") is not None:
+        config.download_concurrency = int(s["async_download_concurrency"])
+    if _num(s, "context_window") is not None:
+        config.context_window = int(s["context_window"])
+
+    # ---- validator ----
+    v = _section("validator")
+    if _num(v, "max_concurrency") is not None:
+        config.validator_max_concurrency = int(v["max_concurrency"])
+    if _num(v, "request_timeout") is not None:
+        config.request_timeout = int(v["request_timeout"])
+    if _num(v, "num_workers") is not None:
+        config.validator_workers = int(v["num_workers"])
+
+    # ---- database ----
+    d = _section("database")
+    if isinstance(d.get("db_path"), str) and d["db_path"].strip():
+        config.db_path = d["db_path"].strip()
+    if _num(d, "batch_size") is not None:
+        config.db_batch_size = int(d["batch_size"])
+    if _num(d, "flush_interval") is not None:
+        config.db_flush_interval = float(d["flush_interval"])
+
+    # ---- circuit breaker（模块级常量必须在其他模块 import 前修改） ----
+    cb = _section("circuit_breaker")
+    global CIRCUIT_BREAKER_FAILURE_THRESHOLD, CIRCUIT_BREAKER_RECOVERY_TIMEOUT
+    global CIRCUIT_BREAKER_HALF_OPEN_REQUESTS
+    if "enabled" in cb:
+        config.circuit_breaker_enabled = bool(cb["enabled"])
+    if _num(cb, "failure_threshold") is not None:
+        CIRCUIT_BREAKER_FAILURE_THRESHOLD = int(cb["failure_threshold"])
+    if _num(cb, "recovery_timeout") is not None:
+        CIRCUIT_BREAKER_RECOVERY_TIMEOUT = int(cb["recovery_timeout"])
+    if _num(cb, "half_open_requests") is not None:
+        CIRCUIT_BREAKER_HALF_OPEN_REQUESTS = int(cb["half_open_requests"])
+
+    # ---- 黑名单 / 文件过滤（存到 config，scanner 启动时合并，不覆盖内置规则） ----
+    bl = _section("blacklist")
+    if isinstance(bl.get("domains"), list):
+        config.extra_domain_blacklist = [str(x) for x in bl["domains"]]
+    if isinstance(bl.get("paths"), list):
+        config.extra_path_blacklist = [str(x) for x in bl["paths"]]
+    ff = _section("file_filter")
+    if isinstance(ff.get("allowed_extensions"), list):
+        config.extra_allowed_extensions = [str(x) for x in ff["allowed_extensions"]]
+    if isinstance(ff.get("blocked_extensions"), list):
+        config.extra_blocked_extensions = [str(x) for x in ff["blocked_extensions"]]
+
+    # ---- monitoring / logging ----
+    m = _section("monitoring")
+    if "enable_prometheus" in m:
+        config.enable_prometheus = bool(m["enable_prometheus"])
+    if _num(m, "prometheus_port") is not None:
+        config.prometheus_port = int(m["prometheus_port"])
+    if _num(m, "stats_interval") is not None:
+        config.stats_interval = int(m["stats_interval"])
+    lg = _section("logging")
+    if isinstance(lg.get("level"), str) and lg["level"].strip():
+        config.log_level = lg["level"].strip().upper()
+    if "log_to_file" in lg:
+        config.log_to_file = bool(lg["log_to_file"])
+    if isinstance(lg.get("log_file"), str) and lg["log_file"].strip():
+        config.log_file = lg["log_file"].strip()
+
+    print(f"[OK] 已加载外部配置: {cfg_path}")
+
+
+_load_yaml_overrides()
+
 
 # ============================================================================
 #                          Local Configuration Override (config_local.py)
