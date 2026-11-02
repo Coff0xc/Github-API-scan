@@ -1,28 +1,74 @@
 """
-Web Dashboard for API Key Scanner
+Web Dashboard for API Key Scanner (hardened)
+============================================
 
 A Flask-based web interface providing:
 - Real-time scanning statistics
-- Valid key visualization
+- Valid key visualization (masked by default)
 - Search and filter capabilities
-- Export functionality
+- Encrypted export functionality
 - Live log streaming
+
+Security model:
+--------------
+- DASHBOARD_TOKEN 环境变量设置访问令牌；未设置时进入"只读脱敏模式"，
+  Key 永远脱敏显示、导出与 reveal 接口直接禁用。
+- 令牌通过 X-API-Token 请求头传递（也接受 ?token= 查询参数，便于浏览器）。
+- DASHBOARD_HOST 默认 127.0.0.1；仅在你理解风险时改为 0.0.0.0。
+- /api/export 默认返回 Fernet 加密的 JSON（EXPORT_KEY 派生密钥，
+  未设置 EXPORT_KEY 时从 DASHBOARD_TOKEN 派生），明文 key 不出网。
+- 认证失败按 IP 限速，防暴力枚举。
+
+Decrypt export:
+--------------
+    python -c "
+    import base64,hashlib,sys
+    from cryptography.fernet import Fernet
+    secret=b'你的EXPORT_KEY或DASHBOARD_TOKEN'
+    k=base64.urlsafe_b64encode(hashlib.pbkdf2_hmac('sha256',secret,b'github-api-scan/export/v1',200000))
+    print(Fernet(k).decrypt(open(sys.argv[1],'rb').read()).decode())
+    " export_xxx.bin
 """
+
+import os
+import io
+import json
+import base64
+import hashlib
+import hmac
+import sqlite3
+import time
+from collections import defaultdict, deque
+from datetime import datetime
+from pathlib import Path
 
 from flask import Flask, render_template, jsonify, request, send_file
 from flask_cors import CORS
-import sqlite3
-import json
-from datetime import datetime
-from pathlib import Path
-import threading
-import queue
+
+from key_vault import vault
 
 app = Flask(__name__)
+
+# CORS: 仍开放给本机前端调试；跨域读取 key 类接口受 token 保护
 CORS(app)
 
+# ---------------------------------------------------------------------------
+# 配置
+# ---------------------------------------------------------------------------
+
+DASHBOARD_TOKEN = os.getenv("DASHBOARD_TOKEN", "").strip()
+DASHBOARD_HOST = os.getenv("DASHBOARD_HOST", "127.0.0.1").strip()
+EXPORT_KEY_SECRET = os.getenv("EXPORT_KEY", "").strip() or DASHBOARD_TOKEN
+
+AUTH_ENABLED = bool(DASHBOARD_TOKEN)
+
+# 认证失败限速：每 IP 60 秒内最多 10 次失败
+_AUTH_FAIL_LIMIT = 10
+_AUTH_FAIL_WINDOW = 60
+_auth_failures = defaultdict(deque)
+
 # Global state
-stats_queue = queue.Queue()
+stats_queue = None
 current_stats = {
     'total_scanned': 0,
     'total_keys_found': 0,
@@ -33,6 +79,80 @@ current_stats = {
     'is_running': False,
     'current_keyword': '',
 }
+
+_EXPORT_SALT = b"github-api-scan/export/v1"
+_EXPORT_ITERATIONS = 200_000
+
+
+def _derive_export_key() -> bytes:
+    """PBKDF2 派生导出加密密钥（EXPORT_KEY 优先，否则 DASHBOARD_TOKEN）"""
+    derived = hashlib.pbkdf2_hmac(
+        "sha256", EXPORT_KEY_SECRET.encode("utf-8"), _EXPORT_SALT, _EXPORT_ITERATIONS
+    )
+    return base64.urlsafe_b64encode(derived)
+
+
+def _mask_key(api_key: str) -> str:
+    """脱敏展示（vault 自动处理密文/明文两种存储形态）"""
+    return vault.mask(api_key)
+
+
+# ---------------------------------------------------------------------------
+# 认证
+# ---------------------------------------------------------------------------
+
+def _client_ip() -> str:
+    return request.headers.get("X-Forwarded-For", request.remote_addr or "?").split(",")[0].strip()
+
+
+def _auth_fail_limited(ip: str) -> bool:
+    now = time.time()
+    window = _auth_failures[ip]
+    while window and now - window[0] > _AUTH_FAIL_WINDOW:
+        window.popleft()
+    return len(window) >= _AUTH_FAIL_LIMIT
+
+
+def _record_auth_fail(ip: str):
+    _auth_failures[ip].append(time.time())
+
+
+def _auth_gate():
+    """
+    统一鉴权闸门。返回 None 表示通过；否则返回 (jsonify响应, 状态码)。
+
+    - 未配置 DASHBOARD_TOKEN：受保护接口一律 403（功能禁用）
+    - 失败次数超限：429（按 IP 限速）
+    - 令牌错误/缺失：401（常量时间比对，不泄漏时序信息）
+    """
+    if not AUTH_ENABLED:
+        return jsonify({'error': '未配置 DASHBOARD_TOKEN，该接口已禁用'}), 403
+
+    supplied = request.headers.get("X-API-Token", "").strip() or request.args.get("token", "").strip()
+    if not supplied:
+        return jsonify({'error': '缺少令牌（X-API-Token 头或 ?token=）'}), 401
+
+    if hmac.compare_digest(DASHBOARD_TOKEN.encode(), supplied.encode()):
+        return None
+
+    ip = _client_ip()
+    if _auth_fail_limited(ip):
+        return jsonify({'error': '认证失败次数过多，请稍后再试'}), 429
+    _record_auth_fail(ip)
+    return jsonify({'error': '令牌无效'}), 401
+
+
+def check_auth() -> bool:
+    """兼容判断：鉴权是否通过"""
+    return _auth_gate() is None
+
+
+@app.after_request
+def _security_headers(resp):
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("X-Frame-Options", "DENY")
+    resp.headers.setdefault("Cache-Control", "no-store")
+    return resp
 
 
 class DatabaseReader:
@@ -73,8 +193,9 @@ class DatabaseReader:
         conn.close()
         return stats
 
-    def get_keys(self, status=None, platform=None, limit=100, offset=0, search=None):
-        """Get keys with filtering"""
+    def get_keys(self, status=None, platform=None, limit=100, offset=0, search=None,
+                 reveal: bool = False):
+        """Get keys with filtering. api_key 默认脱敏，仅显式 reveal 且通过鉴权时返回明文"""
         conn = self.get_connection()
         cursor = conn.cursor()
 
@@ -90,14 +211,21 @@ class DatabaseReader:
             params.append(platform)
 
         if search:
-            query += ' AND (api_key LIKE ? OR source_url LIKE ?)'
-            params.extend([f'%{search}%', f'%{search}%'])
+            # 明文搜索：对哈希/密文库无法 LIKE，改为按指纹精确匹配或模糊匹配来源
+            params.append(vault.hash_key(search))
+            query += ' AND (key_hash = ? OR source_url LIKE ?)'
+            params.append(f'%{search}%')
 
         query += ' ORDER BY found_time DESC LIMIT ? OFFSET ?'
         params.extend([limit, offset])
 
         cursor.execute(query, params)
-        keys = [dict(row) for row in cursor.fetchall()]
+        keys = []
+        for row in cursor.fetchall():
+            item = dict(row)
+            stored = item.get('api_key', '') or ''
+            item['api_key'] = vault.decrypt(stored) if reveal else _mask_key(stored)
+            keys.append(item)
 
         # Get total count
         count_query = query.split('ORDER BY')[0].replace('SELECT *', 'SELECT COUNT(*)')
@@ -133,21 +261,31 @@ def index():
 @app.route('/api/stats')
 def api_stats():
     """Get current statistics"""
-    db_stats = db_reader.get_stats()
+    try:
+        db_stats = db_reader.get_stats()
+    except sqlite3.Error:
+        db_stats = {}
     db_stats.update(current_stats)
+    db_stats['auth_enabled'] = AUTH_ENABLED
     return jsonify(db_stats)
 
 
 @app.route('/api/keys')
 def api_keys():
-    """Get keys with filtering"""
+    """Get keys with filtering（默认脱敏；reveal=1 需令牌）"""
     status = request.args.get('status')
     platform = request.args.get('platform')
-    limit = int(request.args.get('limit', 100))
-    offset = int(request.args.get('offset', 0))
+    limit = min(int(request.args.get('limit', 100)), 1000)
+    offset = max(int(request.args.get('offset', 0)), 0)
     search = request.args.get('search')
 
-    result = db_reader.get_keys(status, platform, limit, offset, search)
+    reveal = request.args.get('reveal') in ('1', 'true')
+    if reveal:
+        gate = _auth_gate()
+        if gate:
+            return gate
+
+    result = db_reader.get_keys(status, platform, limit, offset, search, reveal=reveal)
     return jsonify(result)
 
 
@@ -160,36 +298,78 @@ def api_platforms():
 
 @app.route('/api/export')
 def api_export():
-    """Export keys to JSON"""
+    """
+    Export keys.
+
+    - 必须配置并通过令牌鉴权（未配置 DASHBOARD_TOKEN 时直接禁用）
+    - 默认返回 Fernet 加密的 JSON（.bin），密钥由 EXPORT_KEY 或 DASHBOARD_TOKEN 派生
+    - mask=1 时返回脱敏 JSON（无明文 key，可安全流转）
+    """
+    if not AUTH_ENABLED:
+        return jsonify({'error': '未配置 DASHBOARD_TOKEN，导出功能已禁用'}), 403
+    gate = _auth_gate()
+    if gate:
+        return gate
+
     status = request.args.get('status')
     platform = request.args.get('platform')
+    mask_only = request.args.get('mask') in ('1', 'true')
 
-    result = db_reader.get_keys(status, platform, limit=10000)
+    result = db_reader.get_keys(status, platform, limit=10000, reveal=not mask_only)
 
-    filename = f'export_{datetime.now().strftime("%Y%m%d_%H%M%S")}.json'
-    filepath = Path(filename)
+    payload = json.dumps(result['keys'], indent=2, ensure_ascii=False).encode('utf-8')
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    with open(filepath, 'w', encoding='utf-8') as f:
-        json.dump(result['keys'], f, indent=2, ensure_ascii=False)
+    if mask_only:
+        return send_file(
+            io.BytesIO(payload),
+            as_attachment=True,
+            download_name=f'export_masked_{stamp}.json',
+            mimetype='application/json',
+        )
 
-    return send_file(filepath, as_attachment=True)
+    from cryptography.fernet import Fernet
+    encrypted = Fernet(_derive_export_key()).encrypt(payload)
+    return send_file(
+        io.BytesIO(encrypted),
+        as_attachment=True,
+        download_name=f'export_{stamp}.bin',
+        mimetype='application/octet-stream',
+    )
 
 
 @app.route('/api/stats/update', methods=['POST'])
 def api_stats_update():
-    """Update current stats (called by scanner)"""
+    """Update current stats (called by scanner; requires token)"""
+    if not AUTH_ENABLED:
+        return jsonify({'status': 'error', 'message': '未配置 DASHBOARD_TOKEN，推送接口已禁用'}), 403
+    gate = _auth_gate()
+    if gate:
+        return gate
+
     global current_stats
-    data = request.get_json()
-    current_stats.update(data)
+    data = request.get_json(silent=True) or {}
+    for key in current_stats:
+        if key in data:
+            current_stats[key] = data[key]
     return jsonify({'status': 'ok'})
 
 
-def run_server(host='127.0.0.1', port=5000):
-    """Run Flask server"""
-    app.run(host=host, port=port, debug=False, threaded=True)
+def run_server(host=None, port=5000):
+    """Run Flask server（默认仅监听本机回环地址）"""
+    bind_host = host or DASHBOARD_HOST
+    app.run(host=bind_host, port=port, debug=False, threaded=True)
 
 
 if __name__ == '__main__':
     print("Starting Web Dashboard...")
-    print("Access at: http://127.0.0.1:5000")
+    if AUTH_ENABLED:
+        print(f"Auth: ENABLED (DASHBOARD_TOKEN set) | reveal/export 可用")
+    else:
+        print("Auth: DISABLED (未设置 DASHBOARD_TOKEN)")
+        print("  - Key 仅脱敏显示，reveal / export / stats 推送已禁用")
+        print("  - 设置环境变量 DASHBOARD_TOKEN 后重启以启用完整功能")
+    if DASHBOARD_HOST not in ("127.0.0.1", "localhost"):
+        print(f"⚠ 警告: 监听 {DASHBOARD_HOST} 会将面板暴露到网络，请确认已设置强令牌！")
+    print(f"Access at: http://{DASHBOARD_HOST}:5000")
     run_server()
