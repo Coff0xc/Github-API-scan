@@ -6,7 +6,9 @@ AI 检测器与 Scanner 集成模块
 在正则匹配后、验证前进行智能过滤
 """
 
+import os
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional, Tuple, List
 from dataclasses import dataclass
 
@@ -88,22 +90,36 @@ class ScannerAIIntegration:
             return True
 
         try:
-            # 尝试初始化 Ollama 后端
+            # 选择 LLM 后端：AI_DETECTOR_BACKEND=openai 时走 OpenAI 兼容 API
+            #（官方 API / 中转站均可，AI_LLM_BASE_URL 指定端点），否则默认本地 Ollama
             if self.enable_ai:
-                backend = OllamaBackend(
-                    base_url=self.ollama_url,
-                    model=self.ollama_model
-                )
-
-                if await backend.is_available():
+                backend_name = os.getenv("AI_DETECTOR_BACKEND", "ollama").strip().lower()
+                if backend_name == "openai" and os.getenv("OPENAI_API_KEY"):
+                    backend = OpenAIBackend(
+                        api_key=os.getenv("OPENAI_API_KEY"),
+                        base_url=os.getenv("AI_LLM_BASE_URL", "https://api.openai.com/v1"),
+                        model=os.getenv("AI_LLM_MODEL", "gpt-3.5-turbo"),
+                    )
                     ai_detector = AIDetector(backend=backend)
                     self.detector = SmartDetector(ai_detector=ai_detector)
-                    logger.info(f"AI 检测器已初始化 (Ollama: {self.ollama_model})")
+                    logger.info(
+                        f"AI 检测器已初始化 (OpenAI 兼容 API: {backend.model} @ {backend.base_url})"
+                    )
                 else:
-                    # 降级到 Mock 后端
-                    logger.warning("Ollama 不可用，使用规则引擎模式")
-                    ai_detector = AIDetector(backend=MockBackend())
-                    self.detector = SmartDetector(ai_detector=ai_detector)
+                    backend = OllamaBackend(
+                        base_url=self.ollama_url,
+                        model=self.ollama_model
+                    )
+
+                    if await backend.is_available():
+                        ai_detector = AIDetector(backend=backend)
+                        self.detector = SmartDetector(ai_detector=ai_detector)
+                        logger.info(f"AI 检测器已初始化 (Ollama: {self.ollama_model})")
+                    else:
+                        # 降级到 Mock 后端
+                        logger.warning("Ollama 不可用，使用规则引擎模式")
+                        ai_detector = AIDetector(backend=MockBackend())
+                        self.detector = SmartDetector(ai_detector=ai_detector)
             else:
                 # 仅使用规则过滤
                 ai_detector = AIDetector(backend=MockBackend())
@@ -242,56 +258,79 @@ class ScannerAIIntegration:
 #                         Scanner 补丁函数
 # ============================================================================
 
+# 同步桥接池：scanner 提取管线是同步代码，AI 过滤是异步实现，
+# 用独立线程的事件循环执行，避免与 scanner 自身的事件循环冲突
+_bridge_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ai-bridge")
+
+
+def _run_coro_sync(coro, timeout: float = 60.0):
+    """在独立线程的事件循环中运行协程并同步等待结果"""
+    return _bridge_pool.submit(asyncio.run, coro).result(timeout=timeout)
+
+
 def patch_scanner_with_ai(scanner_module, ai_integration: ScannerAIIntegration = None):
     """
-    为 Scanner 模块添加 AI 过滤功能
+    为 Scanner 添加 AI 过滤补丁
+
+    正确的挂载点是 GitHubScanner._extract_keys_from_content（类方法，
+    签名 (self, content, source_url)）；同步方法内部通过桥接线程调用异步过滤。
 
     Usage:
-        from scanner import *
-        from ai_scanner_integration import patch_scanner_with_ai, ScannerAIIntegration
-
-        ai_integration = ScannerAIIntegration()
-        patch_scanner_with_ai(scanner_module, ai_integration)
+        import scanner
+        from ai_scanner_integration import patch_scanner_with_ai
+        patch_scanner_with_ai(scanner)
     """
     if ai_integration is None:
         ai_integration = ScannerAIIntegration()
 
-    # 保存原始的 extract_keys 函数
-    if hasattr(scanner_module, 'extract_keys_from_content'):
+    original_extract = None
+    target = None
+
+    # 优先挂载类方法（scanner.py 的真实实现）
+    if hasattr(scanner_module, 'GitHubScanner') and \
+            hasattr(scanner_module.GitHubScanner, '_extract_keys_from_content'):
+        target = scanner_module.GitHubScanner
+        original_extract = target._extract_keys_from_content
+    elif hasattr(scanner_module, 'extract_keys_from_content'):
         original_extract = scanner_module.extract_keys_from_content
+    else:
+        logger.warning("AI 补丁: 未找到可挂载的提取函数（"
+                       "GitHubScanner._extract_keys_from_content / extract_keys_from_content），跳过")
+        return
 
-        async def patched_extract(content: str, source_url: str = "", file_path: str = ""):
-            # 调用原始提取函数
-            results = original_extract(content, source_url, file_path)
-
+    if target is not None:
+        def patched_extract(self, content: str, source_url: str = ""):
+            results = original_extract(self, content, source_url)
             if not results:
                 return results
 
-            # 确保 AI 集成已初始化
-            if not ai_integration.initialized:
-                await ai_integration.initialize()
+            try:
+                async def _filter_all():
+                    if not ai_integration.initialized:
+                        await ai_integration.initialize()
+                    kept = []
+                    for r in results:
+                        f = await ai_integration.filter_candidate(
+                            platform=getattr(r, 'platform', 'unknown'),
+                            api_key=getattr(r, 'api_key', ''),
+                            code_snippet=content[:1500],
+                            base_url=getattr(r, 'base_url', ''),
+                            source_url=source_url,
+                        )
+                        if f.should_validate:
+                            kept.append(r)
+                        else:
+                            logger.debug(f"AI 过滤: {f.filter_reason[:80]}")
+                    return kept
 
-            # 过滤结果
-            filtered_results = []
-            for result in results:
-                filtered = await ai_integration.filter_candidate(
-                    platform=result.platform if hasattr(result, 'platform') else 'unknown',
-                    api_key=result.api_key if hasattr(result, 'api_key') else str(result),
-                    code_snippet=content[:1000],  # 限制上下文长度
-                    file_path=file_path,
-                    base_url=result.base_url if hasattr(result, 'base_url') else '',
-                    source_url=source_url
-                )
+                return _run_coro_sync(_filter_all())
+            except Exception as e:
+                logger.warning(f"AI 过滤失败，保留原始提取结果: {e}")
+                return results
 
-                if filtered.should_validate:
-                    filtered_results.append(result)
-                else:
-                    logger.debug(f"AI 过滤: {filtered.filter_reason}")
-
-            return filtered_results
-
-        scanner_module.extract_keys_from_content = patched_extract
-        logger.info("已为 Scanner 添加 AI 过滤补丁")
+        target._extract_keys_from_content = patched_extract
+        logger.info("已为 GitHubScanner._extract_keys_from_content 添加 AI 过滤补丁")
+        return
 
 
 # ============================================================================

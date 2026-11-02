@@ -45,11 +45,14 @@ class SecretScanner:
 
     def __init__(self, enable_pastebin: bool = False, enable_gist: bool = False,
                  enable_searchcode: bool = False, enable_gitlab: bool = False,
-                 enable_realtime: bool = False, pastebin_api_key: str = ""):
+                 enable_realtime: bool = False, pastebin_api_key: str = "",
+                 target_org: str = "", target_repo: str = ""):
         self.stop_event = threading.Event()
         self.result_queue = queue.Queue(maxsize=1000)
         self.db = Database(config.db_path)
         self.dashboard = Dashboard()
+        self.target_org = target_org
+        self.target_repo = target_repo
 
         self.scanner_thread = None
         self.validator_threads = []
@@ -92,12 +95,14 @@ class SecretScanner:
             num_workers=2
         )
 
-        # 启动 GitHub 扫描器（Producer）
+        # 启动 GitHub 扫描器（Producer，带授权范围限定）
         self.scanner_thread = start_scanner(
             self.result_queue,
             self.db,
             self.stop_event,
-            dashboard=self.dashboard
+            dashboard=self.dashboard,
+            target_org=self.target_org,
+            target_repo=self.target_repo
         )
 
         # 启动 Pastebin 扫描器
@@ -343,8 +348,45 @@ def main():
     parser.add_argument('--gitlab', action='store_true', help='启用 GitLab Snippets 扫描源')
     parser.add_argument('--realtime', action='store_true', help='启用实时监控 (GitHub Events)')
     parser.add_argument('--all-sources', action='store_true', help='启用所有扫描源')
+    parser.add_argument('--authorized', action='store_true',
+                        help='声明仅在授权范围内使用本工具（详见 AUTHORIZED_USE.md）')
+
+    # 授权渗透 / 自有资产审计功能
+    parser.add_argument('--scan-local', metavar='DIR',
+                        help='扫描本地目录（含全量 Git 历史，授权资产审计）')
+    parser.add_argument('--no-git-history', action='store_true',
+                        help='--scan-local 时跳过历史提交（默认扫全量历史）')
+    parser.add_argument('--target-org', metavar='ORG',
+                        help='将 GitHub 搜索限定到指定组织（授权范围）')
+    parser.add_argument('--target-repo', metavar='OWNER/REPO',
+                        help='将 GitHub 搜索限定到指定仓库（优先级高于 --target-org）')
+    parser.add_argument('--report', metavar='FILE',
+                        help='生成 Markdown 威胁报告（存活凭据清单 + 处置建议）')
+    parser.add_argument('--reveal-report', action='store_true',
+                        help='威胁报告中输出完整 Key（默认脱敏）')
 
     args = parser.parse_args()
+
+    # 使用边界确认（--authorized 或环境变量 SCANNER_AUTHORIZED=1 可跳过交互）
+    from use_boundary import check_authorization
+    if not check_authorization(getattr(args, "authorized", False)):
+        return
+
+    # 本地资产扫描模式（目录 + 全量 Git 历史 → 统一验证管线）
+    if args.scan_local:
+        from local_scanner import run_local_scan
+        run_local_scan(args.scan_local, config.db_path,
+                       scan_git_history=not args.no_git_history)
+        if args.report:
+            from threat_report import generate_report
+            print(generate_report(config.db_path, args.report, reveal=args.reveal_report))
+        return
+
+    # 威胁报告模式（基于已有数据库，不扫描）
+    if args.report:
+        from threat_report import generate_report
+        print(generate_report(config.db_path, args.report, reveal=args.reveal_report))
+        return
 
     if args.proxy:
         config.proxy_url = args.proxy
@@ -377,7 +419,9 @@ def main():
         enable_searchcode=enable_searchcode,
         enable_gitlab=enable_gitlab,
         enable_realtime=enable_realtime,
-        pastebin_api_key=args.pastebin_key
+        pastebin_api_key=args.pastebin_key,
+        target_org=getattr(args, "target_org", "") or "",
+        target_repo=getattr(args, "target_repo", "") or ""
     )
     scanner.start()
 

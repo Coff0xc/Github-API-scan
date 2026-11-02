@@ -490,8 +490,15 @@ v2.1 新特性:
     parser.add_argument('--gitlab', action='store_true', help='启用 GitLab Snippets 扫描源')
     parser.add_argument('--realtime', action='store_true', help='启用实时监控 (GitHub Events)')
     parser.add_argument('--all-sources', action='store_true', help='启用所有扫描源')
+    parser.add_argument('--authorized', action='store_true',
+                        help='声明仅在授权范围内使用本工具（详见 AUTHORIZED_USE.md）')
 
     args = parser.parse_args()
+
+    # 使用边界确认（--authorized 或环境变量 SCANNER_AUTHORIZED=1 可跳过交互）
+    from use_boundary import check_authorization
+    if not check_authorization(getattr(args, "authorized", False)):
+        return
 
     if args.proxy:
         config.proxy_url = args.proxy
