@@ -21,6 +21,8 @@ from enum import Enum
 
 from loguru import logger
 
+from key_vault import vault
+
 
 class KeyStatus(Enum):
     """API Key 状态枚举"""
@@ -126,11 +128,14 @@ class Database:
                 cursor = conn.cursor()
                 
                 # 创建主表（优化后的结构 + 深度验证字段）
+                # api_key 列: 启用 DB_ENCRYPTION_KEY 时存 Fernet 密文（enc:v1: 前缀）
+                # key_hash 列: SHA-256 指纹，用于唯一去重（不随加密开关变化）
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS leaked_keys (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         platform TEXT NOT NULL,
                         api_key TEXT NOT NULL UNIQUE,
+                        key_hash TEXT,
                         base_url TEXT NOT NULL,
                         status TEXT DEFAULT 'pending',
                         balance TEXT DEFAULT '',
@@ -157,6 +162,26 @@ class Database:
                         value_score INTEGER DEFAULT 0
                     )
                 """)
+
+                # key_hash 列迁移 + 旧数据回填（兼容历史数据库）
+                try:
+                    cursor.execute("ALTER TABLE leaked_keys ADD COLUMN key_hash TEXT")
+                except sqlite3.OperationalError:
+                    pass  # 字段已存在
+                cursor.execute(
+                    "SELECT id, api_key FROM leaked_keys WHERE key_hash IS NULL"
+                )
+                for row_id, stored_key in cursor.fetchall():
+                    cursor.execute(
+                        "UPDATE leaked_keys SET key_hash = ? WHERE id = ?",
+                        (vault.hash_key(vault.decrypt(stored_key)), row_id),
+                    )
+                try:
+                    cursor.execute(
+                        "CREATE UNIQUE INDEX IF NOT EXISTS idx_key_hash ON leaked_keys(key_hash)"
+                    )
+                except sqlite3.OperationalError as e:
+                    logger.warning(f"key_hash 唯一索引创建失败（旧数据可能存在重复）: {e}")
                 
                 # 尝试添加新字段（兼容旧数据库）
                 try:
@@ -289,16 +314,16 @@ class Database:
     
     def key_exists(self, api_key: str) -> bool:
         """
-        检查 Key 是否已存在
-        
+        检查 Key 是否已存在（按 key_hash 指纹查询，明文/密文模式均适用）
+
         用于验证前检查，避免重复验证已入库的 Key
         """
         with self._lock:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    "SELECT 1 FROM leaked_keys WHERE api_key = ? LIMIT 1",
-                    (api_key,)
+                    "SELECT 1 FROM leaked_keys WHERE key_hash = ? LIMIT 1",
+                    (vault.hash_key(api_key),)
                 )
                 return cursor.fetchone() is not None
     
@@ -315,14 +340,15 @@ class Database:
                 try:
                     cursor.execute("""
                         INSERT INTO leaked_keys
-                        (platform, api_key, base_url, status, balance, source_url, model_tier, rpm, is_high_value, found_time,
+                        (platform, api_key, key_hash, base_url, status, balance, source_url, model_tier, rpm, is_high_value, found_time,
                          balance_usd, used_quota_usd, total_quota_usd, tpm, rpd,
                          has_gpt4, has_gpt5, has_claude_opus, organization, account_name,
                          expiration_date, key_type, value_score)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
                         key.platform,
-                        key.api_key,
+                        vault.encrypt(key.api_key),
+                        vault.hash_key(key.api_key),
                         key.base_url,
                         key.status,
                         key.balance,
@@ -404,7 +430,7 @@ class Database:
                         balance_usd = ?, used_quota_usd = ?, total_quota_usd = ?, tpm = ?, rpd = ?,
                         has_gpt4 = ?, has_gpt5 = ?, has_claude_opus = ?,
                         organization = ?, account_name = ?, expiration_date = ?, key_type = ?, value_score = ?
-                    WHERE api_key = ?
+                    WHERE key_hash = ?
                 """, (
                     status.value, balance, model_tier, rpm,
                     1 if is_high_value else 0,
@@ -414,7 +440,7 @@ class Database:
                     1 if has_gpt5 else 0,
                     1 if has_claude_opus else 0,
                     organization, account_name, expiration_date, key_type, value_score,
-                    api_key
+                    vault.hash_key(api_key)
                 ))
                 conn.commit()
                 return cursor.rowcount > 0
@@ -494,13 +520,13 @@ class Database:
     
     @staticmethod
     def _row_to_key(row: sqlite3.Row) -> LeakedKey:
-        """将数据库行转换为 LeakedKey 对象"""
+        """将数据库行转换为 LeakedKey 对象（api_key 透明解密）"""
         # 兼容旧数据库（无新字段）
         row_dict = dict(row)
         return LeakedKey(
             id=row_dict.get("id"),
             platform=row_dict.get("platform", ""),
-            api_key=row_dict.get("api_key", ""),
+            api_key=vault.decrypt(row_dict.get("api_key", "")),
             base_url=row_dict.get("base_url", ""),
             status=row_dict.get("status", "pending"),
             balance=row_dict.get("balance") or "",

@@ -16,6 +16,8 @@ from contextlib import asynccontextmanager
 from loguru import logger
 
 from database import LeakedKey, KeyStatus
+from key_vault import vault
+from config import config as app_config
 
 
 class AsyncDatabase:
@@ -25,8 +27,9 @@ class AsyncDatabase:
         self.db_path = db_path
         self._write_queue: List[LeakedKey] = []
         self._queue_lock = asyncio.Lock()
-        self._batch_size = 50
-        self._flush_interval = 5.0  # 秒
+        # 批量写入参数可通过 config.yaml database.batch_size / flush_interval 调整
+        self._batch_size = app_config.db_batch_size
+        self._flush_interval = app_config.db_flush_interval  # 秒
         self._flush_task: Optional[asyncio.Task] = None
 
     async def init(self):
@@ -37,6 +40,7 @@ class AsyncDatabase:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     platform TEXT NOT NULL,
                     api_key TEXT NOT NULL UNIQUE,
+                    key_hash TEXT,
                     base_url TEXT NOT NULL,
                     status TEXT DEFAULT 'pending',
                     balance TEXT DEFAULT '',
@@ -50,6 +54,27 @@ class AsyncDatabase:
             """)
             await db.execute("CREATE INDEX IF NOT EXISTS idx_status ON leaked_keys(status)")
             await db.execute("CREATE INDEX IF NOT EXISTS idx_platform ON leaked_keys(platform)")
+
+            # key_hash 列迁移 + 旧数据回填（兼容历史数据库）
+            try:
+                await db.execute("ALTER TABLE leaked_keys ADD COLUMN key_hash TEXT")
+            except Exception:
+                pass  # 字段已存在
+            async with db.execute(
+                "SELECT id, api_key FROM leaked_keys WHERE key_hash IS NULL"
+            ) as cursor:
+                rows = await cursor.fetchall()
+            for row_id, stored_key in rows:
+                await db.execute(
+                    "UPDATE leaked_keys SET key_hash = ? WHERE id = ?",
+                    (vault.hash_key(vault.decrypt(stored_key)), row_id),
+                )
+            try:
+                await db.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_key_hash ON leaked_keys(key_hash)"
+                )
+            except Exception as e:
+                logger.warning(f"key_hash 唯一索引创建失败（旧数据可能存在重复）: {e}")
 
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS scanned_blobs (
@@ -96,10 +121,11 @@ class AsyncDatabase:
                 try:
                     await db.execute("""
                         INSERT OR IGNORE INTO leaked_keys
-                        (platform, api_key, base_url, status, balance, source_url, model_tier, rpm, is_high_value, found_time)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        (platform, api_key, key_hash, base_url, status, balance, source_url, model_tier, rpm, is_high_value, found_time)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
-                        key.platform, key.api_key, key.base_url, key.status,
+                        key.platform, vault.encrypt(key.api_key), vault.hash_key(key.api_key),
+                        key.base_url, key.status,
                         key.balance, key.source_url, key.model_tier, key.rpm,
                         1 if key.is_high_value else 0,
                         key.found_time.isoformat() if key.found_time else datetime.now().isoformat()
@@ -118,11 +144,11 @@ class AsyncDatabase:
                 asyncio.create_task(self._flush_queue())
 
     async def key_exists(self, api_key: str) -> bool:
-        """检查 Key 是否存在"""
+        """检查 Key 是否存在（按 key_hash 指纹查询）"""
         async with aiosqlite.connect(self.db_path) as db:
             async with db.execute(
-                "SELECT 1 FROM leaked_keys WHERE api_key = ? LIMIT 1",
-                (api_key,)
+                "SELECT 1 FROM leaked_keys WHERE key_hash = ? LIMIT 1",
+                (vault.hash_key(api_key),)
             ) as cursor:
                 return await cursor.fetchone() is not None
 
@@ -157,16 +183,16 @@ class AsyncDatabase:
         rpm: int = 0,
         is_high_value: bool = False
     ):
-        """更新 Key 状态"""
+        """更新 Key 状态（按 key_hash 指纹定位）"""
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("""
                 UPDATE leaked_keys
                 SET status = ?, balance = ?, model_tier = ?, rpm = ?, is_high_value = ?, verified_time = ?
-                WHERE api_key = ?
+                WHERE key_hash = ?
             """, (
                 status.value, balance, model_tier, rpm,
                 1 if is_high_value else 0,
-                datetime.now().isoformat(), api_key
+                datetime.now().isoformat(), vault.hash_key(api_key)
             ))
             await db.commit()
 
