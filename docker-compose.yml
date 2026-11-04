@@ -4,6 +4,8 @@ services:
   scanner:
     build: .
     container_name: api-key-scanner
+    env_file:
+      - .env
     volumes:
       - ./data:/app/data
       - ./config_local.py:/app/config_local.py:ro
@@ -11,6 +13,8 @@ services:
       - GITHUB_TOKENS=${GITHUB_TOKENS}
       - PROXY_URL=${PROXY_URL:-}
       - DB_PATH=/app/data/leaked_keys.db
+      - DB_ENCRYPTION_KEY=${DB_ENCRYPTION_KEY:-}
+      - SCANNER_AUTHORIZED=${SCANNER_AUTHORIZED:-1}
     restart: unless-stopped
     command: python main_v2.2.py
 
@@ -18,11 +22,18 @@ services:
     build: .
     container_name: api-key-dashboard
     ports:
-      - "5000:5000"
+      # 如需局域网访问改为 "5000:5000"，并务必在 .env 设置强 DASHBOARD_TOKEN
+      - "127.0.0.1:5000:5000"
+    env_file:
+      - .env
     volumes:
       - ./data:/app/data
     environment:
       - DB_PATH=/app/data/leaked_keys.db
+      - DASHBOARD_TOKEN=${DASHBOARD_TOKEN:-}
+      - DASHBOARD_HOST=0.0.0.0
+      - EXPORT_KEY=${EXPORT_KEY:-}
+      - DB_ENCRYPTION_KEY=${DB_ENCRYPTION_KEY:-}
     restart: unless-stopped
     command: python web_dashboard.py
     depends_on:

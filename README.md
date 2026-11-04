@@ -74,7 +74,7 @@ pip install -r requirements.txt
 
 **Configure:**
 
-Create `config_local.py`:
+Create `config_local.py` (or copy `.env.example` to `.env` for Docker):
 
 ```python
 GITHUB_TOKENS = [
@@ -94,17 +94,28 @@ To get a GitHub token:
 **Run:**
 
 ```bash
-python main_v2.2.py
+python main_v2.2.py --authorized
 ```
 
 That's it. The terminal UI will show what's happening in real-time.
+
+> `--authorized` 确认使用边界（AUTHORIZED_USE.md）；也可用环境变量
+> `SCANNER_AUTHORIZED=1`（CI/Docker 场景）。首次运行不带该参数会弹出边界
+> 声明，交互输入 `y` 亦可。
+
+**Recommended security environment variables** (copy from `.env.example`):
+
+```bash
+export DB_ENCRYPTION_KEY=<随机长密码>   # 结果库静态加密（api_key 不落明文）
+export DASHBOARD_TOKEN=<随机长密码>     # Web 面板访问令牌（未设置时功能受限）
+```
 
 ## Usage
 
 Basic commands:
 
 ```bash
-# Start scanning
+# Start scanning (交互确认使用边界，或加 --authorized 跳过)
 python main_v2.2.py
 
 # View stats
@@ -133,6 +144,25 @@ python main_v2.2.py --all-sources
 python main_v2.2.py --db custom.db
 ```
 
+**授权渗透 / 自有资产审计（authorized engagement）：**
+
+```bash
+# 本地仓库审计：当前文件 + 全量 Git 历史（已删除的密钥也能找到）
+python main_v2.2.py --authorized --scan-local D:\repos\target
+
+# 扫描 + 直接产出威胁报告（存活凭据 = 威胁点，附处置建议）
+python main_v2.2.py --authorized --scan-local D:\repos\target --report threat.md
+
+# 远程 GitHub 搜索限定到授权范围（所有查询自动追加 org:/repo: 限定符）
+python main_v2.2.py --authorized --target-org customer-org
+python main_v2.2.py --authorized --target-repo customer-org/api-server
+
+# 基于已有结果库单独出报告（默认脱敏，--reveal-report 输出完整 Key）
+python main_v2.2.py --authorized --report threat.md --reveal-report
+```
+
+详见 [docs/LOCAL_SCANNING.md](docs/LOCAL_SCANNING.md)。
+
 ## How it works
 
 1. **Scan**: Searches GitHub using optimized queries (93 different search patterns)
@@ -145,6 +175,19 @@ The tool uses a 3-layer cache:
 - L1: Validation results (30-50% hit rate)
 - L2: Domain health (skips dead domains)
 - L3: Key fingerprints (duplicate detection)
+
+## Security hardening (v3.0.1)
+
+| Mechanism | How to enable | Effect |
+|---|---|---|
+| 使用边界确认 | `--authorized` / `SCANNER_AUTHORIZED=1` | 启动前强制确认仅授权使用 |
+| 结果库静态加密 | `DB_ENCRYPTION_KEY` 环境变量 | `api_key` 列存 Fernet 密文，去重走 SHA-256 指纹 |
+| Web 面板鉴权 | `DASHBOARD_TOKEN` 环境变量 | Key 默认脱敏；reveal/导出/推送需令牌，认证失败限速 |
+| 加密导出 | `GET /api/export`（需令牌） | 返回 Fernet 加密 JSON；`mask=1` 可导脱敏版 |
+| config.yaml 生效 | 编辑 `config.yaml` | 熵阈值/并发/黑名单/批量写入等参数现由代码实际读取 |
+
+`config.yaml` 现在是真实生效的外部配置（优先级：内置默认 < config.yaml <
+config_local.py < 命令行参数）。
 
 ## Configuration
 
@@ -218,7 +261,9 @@ database:
 
 ## Legal stuff
 
-This tool is for **authorized security testing only**. Don't use it to:
+This tool is for **authorized security testing only**. See [AUTHORIZED_USE.md](AUTHORIZED_USE.md) for the full boundary policy (enforced at startup).
+
+Don't use it to:
 - Scan repos you don't have permission to test
 - Exploit keys you find
 - Do anything illegal
@@ -278,10 +323,23 @@ Cache effectiveness:
 
 ## Documentation
 
-- [QUICKSTART.md](QUICKSTART.md) - Get started in 5 minutes
-- [OPTIMIZATION.md](OPTIMIZATION.md) - Technical details
-- [MIGRATION.md](MIGRATION.md) - Upgrade guide
-- [CHANGELOG_V3.0.md](CHANGELOG_V3.0.md) - What's new
+**根目录**
+- [AUTHORIZED_USE.md](AUTHORIZED_USE.md) - **使用边界声明（必读）**
+
+**docs/**
+- [QUICKSTART.md](docs/QUICKSTART.md) - Get started in 5 minutes
+- [USAGE_GUIDE.md](docs/USAGE_GUIDE.md) - 完整使用说明
+- [AI_ASSISTED_ANALYSIS.md](docs/AI_ASSISTED_ANALYSIS.md) - AI 辅助假阳性过滤接入（Ollama / OpenAI 兼容 API）
+- [DOCKER_GUIDE.md](docs/DOCKER_GUIDE.md) - Docker 部署
+- [FOFA_GUIDE.md](docs/FOFA_GUIDE.md) - FOFA 扩展源
+- [WEB_DASHBOARD_GUIDE.md](docs/WEB_DASHBOARD_GUIDE.md) - Web 面板
+- [DEEP_VALIDATION_GUIDE.md](docs/DEEP_VALIDATION_GUIDE.md) - 深度验证
+- [REALTIME_PIPELINE_GUIDE.md](docs/REALTIME_PIPELINE_GUIDE.md) - 实时通知管道
+- [NOTIFY_README.md](docs/NOTIFY_README.md) - 通知渠道配置
+- [OPTIMIZATION.md](docs/OPTIMIZATION.md) - Technical details
+- [MIGRATION.md](docs/MIGRATION.md) - Upgrade guide
+- [CHANGELOG_V3.0.md](docs/CHANGELOG_V3.0.md) - What's new
+- [archive/](docs/archive/) - 历史过程文档（50+ 份开发报告存档）
 
 ## Contributing
 
