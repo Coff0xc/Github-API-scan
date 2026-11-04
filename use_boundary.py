@@ -82,3 +82,53 @@ def check_authorization(cli_flag: bool = False, non_interactive: bool = False) -
 
     print("[ABORT] 已取消。")
     return False
+
+
+def require_remote_scope(target_org: str = "", target_repo: str = "") -> bool:
+    """
+    远程 GitHub 搜索必须落到授权资产上。
+
+    未提供 --target-org / --target-repo 时返回 False。仓库限定符必须是 owner/name。
+    """
+    org = (target_org or "").strip()
+    repo = (target_repo or "").strip()
+    if repo:
+        if "/" not in repo or repo.startswith("/") or repo.endswith("/"):
+            print("[ABORT] --target-repo 必须是 owner/name，例如 acme/api-server。")
+            return False
+        return True
+    if org:
+        if "/" in org or " " in org:
+            print("[ABORT] --target-org 只能是组织名，不能包含空格或斜杠。")
+            return False
+        return True
+    print("[ABORT] 远程扫描必须用 --target-org 或 --target-repo 限定到你拥有或获得授权的资产。")
+    print("        只审计本机目录时用 --scan-local。统计、导出、出报告不需要该参数。")
+    return False
+
+
+def public_sources_allowed(explicit: bool) -> bool:
+    """
+    Gist / Pastebin / GitLab / Searchcode / Events 无法用 org: 或 repo: 限定。
+
+    默认拒绝。授权范围确实包含这些公开源时，调用方传入 explicit=True。
+    """
+    if explicit:
+        print("[WARN] 已打开无法按组织或仓库限定的公开源。"
+              "只扫描书面授权范围内的内容。")
+        return True
+    print("[ABORT] Gist、Pastebin、GitLab、Searchcode、GitHub Events 不能限定到单个组织或仓库。")
+    print("        授权范围确实包含这些来源时，追加 --allow-public-sources。")
+    return False
+
+
+def storage_encryption_ready(allow_plaintext: bool) -> bool:
+    """扫描写库前要求 DB_ENCRYPTION_KEY，除非调用方显式允许明文。"""
+    if os.getenv("DB_ENCRYPTION_KEY", "").strip():
+        return True
+    if allow_plaintext:
+        print("[WARN] 已使用 --allow-plaintext-db，凭据将以明文写入数据库。")
+        return True
+    print("[ABORT] 未设置 DB_ENCRYPTION_KEY。扫描写入凭据前请设置该环境变量，")
+    print("        或在你接受明文落盘时显式传入 --allow-plaintext-db。")
+    return False

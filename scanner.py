@@ -12,7 +12,6 @@
 import re
 import os
 import sys
-import math
 import time
 import queue
 import asyncio
@@ -20,7 +19,6 @@ import threading
 from datetime import datetime, timezone
 from typing import Optional, List, Set, Tuple
 from dataclasses import dataclass
-from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 
@@ -222,59 +220,22 @@ if _extra_blocked:
     BLOCKED_EXTENSIONS.update(e for e in _extra_blocked if e not in BLOCKED_EXTENSIONS)
 
 
-# ============================================================================
-#                              文件过滤工具
-# ============================================================================
+# 过滤函数只在 utils 中实现。这里把 config.yaml 合并后的名单交回去，
+# 避免 scanner 与 utils 各维护一份会漂移的副本。
+import utils as _filter_utils
 
-def should_skip_file(file_path: str, file_size: int = 0) -> Tuple[bool, str]:
-    """
-    检查文件是否应该跳过
-    
-    Args:
-        file_path: 文件路径
-        file_size: 文件大小 (字节)
-        
-    Returns:
-        (should_skip, reason)
-    """
-    file_path_lower = file_path.lower()
-    
-    # 1. 检查文件大小
-    if file_size > 0 and file_size > MAX_FILE_SIZE_KB * 1024:
-        return True, f"file_too_large:{file_size//1024}KB"
-    
-    # 2. 检查路径黑名单
-    for blacklist_path in PATH_BLACKLIST:
-        if blacklist_path in file_path_lower:
-            return True, f"path_blacklist:{blacklist_path}"
-    
-    # 3. 检查文件后缀 - 先检查必须屏蔽的
-    # 获取文件后缀
-    ext = ''
-    if '.' in file_path:
-        # 处理 .min.js 等复合后缀
-        if file_path_lower.endswith('.min.js'):
-            ext = '.min.js'
-        elif file_path_lower.endswith('.min.css'):
-            ext = '.min.css'
-        else:
-            ext = '.' + file_path.rsplit('.', 1)[-1].lower()
-    
-    # 检查是否在屏蔽列表
-    if ext in BLOCKED_EXTENSIONS:
-        return True, f"blocked_ext:{ext}"
-    
-    # 4. 如果有后缀，检查是否在允许列表
-    #    注意：共享的文件类型可能没有后缀（如 Dockerfile）或后缀不在列表中
-    #    这种情况不跳过，继续扫描
-    
-    # 特殊文件名检查 - 这些文件一定要扫描
-    important_files = ['dockerfile', '.env', 'config', 'secret', 'credential']
-    file_name = file_path.rsplit('/', 1)[-1].lower() if '/' in file_path else file_path.lower()
-    if any(imp in file_name for imp in important_files):
-        return False, ""
-    
-    return False, ""
+_filter_utils.ENTROPY_THRESHOLD = ENTROPY_THRESHOLD
+_filter_utils.MAX_FILE_SIZE_KB = MAX_FILE_SIZE_KB
+_filter_utils.DOMAIN_BLACKLIST = DOMAIN_BLACKLIST
+_filter_utils.PATH_BLACKLIST = PATH_BLACKLIST
+_filter_utils.BLOCKED_EXTENSIONS = BLOCKED_EXTENSIONS
+_filter_utils.TEST_KEY_PATTERNS = TEST_KEY_PATTERNS
+
+calculate_entropy = _filter_utils.calculate_entropy
+is_test_key = _filter_utils.is_test_key
+is_blacklisted_url = _filter_utils.is_blacklisted_url
+mask_key = _filter_utils.mask_key
+should_skip_file = _filter_utils.should_skip_file
 
 
 # ============================================================================
@@ -296,37 +257,6 @@ class ScanResult:
 # ============================================================================
 #                              工具函数
 # ============================================================================
-
-@lru_cache(maxsize=4096)
-def calculate_entropy(s: str) -> float:
-    """
-    计算字符串的香农熵 (Shannon Entropy) - 带 LRU 缓存
-
-    真正的 API Key 熵值高（看起来像乱码）
-    测试 Key (如 sk-test-12345) 熵值低（有规律）
-
-    Args:
-        s: 输入字符串
-
-    Returns:
-        熵值（0-8 之间，越高越随机）
-    """
-    if not s:
-        return 0.0
-
-    # 统计字符频率
-    freq = Counter(s)
-    length = len(s)
-
-    # 计算熵
-    entropy = 0.0
-    for count in freq.values():
-        if count > 0:
-            p = count / length
-            entropy -= p * math.log2(p)
-
-    return entropy
-
 
 @lru_cache(maxsize=2048)
 def decode_bpe_variants(text: str) -> str:
@@ -364,46 +294,6 @@ def decode_bpe_variants(text: str) -> str:
     decoded = decoded.replace('\\/', '/').replace('\\-', '-')
 
     return decoded
-
-
-@lru_cache(maxsize=2048)
-def is_test_key(api_key: str) -> bool:
-    """
-    检测是否为测试/示例 Key - 带 LRU 缓存
-
-    Args:
-        api_key: API Key
-
-    Returns:
-        是否为测试 Key
-    """
-    key_lower = api_key.lower()
-    return any(pattern in key_lower for pattern in TEST_KEY_PATTERNS)
-
-
-@lru_cache(maxsize=1024)
-def is_blacklisted_url(url: str) -> bool:
-    """
-    检测 URL 是否在黑名单中 - 带 LRU 缓存
-
-    Args:
-        url: URL 字符串
-
-    Returns:
-        是否在黑名单中
-    """
-    if not url:
-        return False
-
-    url_lower = url.lower()
-    return any(blacklist in url_lower for blacklist in DOMAIN_BLACKLIST)
-
-
-def mask_key(api_key: str) -> str:
-    """遮蔽 API Key"""
-    if len(api_key) <= 12:
-        return api_key[:4] + "..." + api_key[-4:]
-    return api_key[:8] + "..." + api_key[-4:]
 
 
 # ============================================================================
@@ -1020,8 +910,11 @@ class GitHubScanner:
             
             # GitHub Dorks 语法不需要额外的 in:file
             query = keyword if any(x in keyword for x in ['filename:', 'path:', 'language:']) else f"{keyword} in:file"
-            # 授权范围限定（--target-org / --target-repo）
+            # 授权范围限定（--target-org / --target-repo）。无范围时不发请求。
             query = apply_search_scope(query, self.target_org, self.target_repo)
+            if not query:
+                self._log("搜索未限定到授权组织或仓库，已跳过", "ERROR")
+                return 0
             client = self._get_github_client()
             code_results = client.search_code(query)
             
@@ -1177,6 +1070,10 @@ class GitHubScanner:
         Args:
             resume: 是否从断点续传
         """
+        if apply_search_scope("scope-check", self.target_org, self.target_repo) is None:
+            self._log("GitHub 搜索未启动：缺少合法的 target_org / target_repo", "ERROR")
+            return
+
         round_num = 0
         keywords = config.search_keywords
         total_keywords = len(keywords)
@@ -1247,18 +1144,21 @@ def _maybe_enable_ai_filter():
         print(f"[WARNING] AI 过滤启用失败，继续使用纯正则管线: {e}")
 
 
-def apply_search_scope(query: str, target_org: str = "", target_repo: str = "") -> str:
+def apply_search_scope(query: str, target_org: str = "", target_repo: str = "") -> Optional[str]:
     """
     将 GitHub 搜索约束到授权范围（org:/repo: 限定符）。
 
-    授权渗透场景下，用 --target-org / --target-repo 把所有搜索查询
-    限定在客户资产范围内，扫描行为与授权边界一一对应。
+    没有合法范围时返回 None，调用方不得把原查询发给 GitHub。
     """
-    if target_repo:
-        return f"{query} repo:{target_repo}"
-    if target_org:
-        return f"{query} org:{target_org}"
-    return query
+    repo = (target_repo or "").strip()
+    org = (target_org or "").strip()
+    if repo:
+        if "/" not in repo or repo.startswith("/") or repo.endswith("/"):
+            return None
+        return f"{query} repo:{repo}"
+    if org and "/" not in org and " " not in org:
+        return f"{query} org:{org}"
+    return None
 
 
 def start_scanner(
@@ -1269,7 +1169,7 @@ def start_scanner(
     resume: bool = False,
     target_org: str = "",
     target_repo: str = ""
-) -> threading.Thread:
+) -> Optional[threading.Thread]:
     """
     启动扫描器线程
 
@@ -1277,7 +1177,12 @@ def start_scanner(
         resume: 是否从断点续传
         target_org: 授权范围限定（org:xxx）
         target_repo: 授权范围限定（repo:owner/name，优先级高于 org）
+
+    缺少授权范围时不启动线程，返回 None。
     """
+    from use_boundary import require_remote_scope
+    if not require_remote_scope(target_org, target_repo):
+        return None
     _maybe_enable_ai_filter()
     scanner = GitHubScanner(result_queue, db, stop_event, dashboard,
                             target_org=target_org, target_repo=target_repo)

@@ -1,15 +1,11 @@
 """
-验证器模块 - 异步 API Key 验证 + 深度价值评估
+验证器模块 - 平台验证原语
 
-核心特性：
-1. AsyncIO + aiohttp 高并发验证 (100 并发)
-2. 深度价值评估 (GPT-4 探测、余额检测、RPM 透视)
-3. 状态细分（valid, invalid, quota_exceeded, connection_error）
-4. UI 仪表盘集成
+进程入口使用 validator_optimized.start_validators。本文件提供熔断器、
+ValidationResult，以及各平台的 validate_key_async。不要新增第三套验证循环。
 
-v2.1 优化：
-- 导出 OptimizedAsyncValidator（使用连接池和智能重试）
-- 保持原有 AsyncValidator 向后兼容
+validator_extended.py / validator_async.py / validator_deep.py / deep_validator.py
+不在默认扫描路径上。
 """
 
 import asyncio
@@ -258,11 +254,7 @@ class CircuitBreaker:
 circuit_breaker = CircuitBreaker()
 
 
-def mask_key(key: str) -> str:
-    """遮蔽 API Key 中间部分"""
-    if len(key) <= 12:
-        return key[:4] + "..." + key[-4:]
-    return key[:8] + "..." + key[-4:]
+from utils import mask_key
 
 
 @dataclass
@@ -1857,8 +1849,12 @@ def start_validators(
     Returns:
         线程列表
     """
+    logger.warning(
+        "validator.start_validators 是遗留入口。新的扫描进程应使用 "
+        "validator_optimized.start_validators（main_v2.2）。"
+    )
     threads = []
-    
+
     # 实际上 1 个线程 + 100 并发已足够，但保留多线程接口兼容性
     actual_workers = min(num_workers, 2)  # 最多 2 个，避免资源浪费
     

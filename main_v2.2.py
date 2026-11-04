@@ -26,12 +26,10 @@ import asyncio
 import threading
 import time
 import argparse
-import csv
-from datetime import datetime
 from typing import Optional
 
 from config import config
-from database import Database, KeyStatus
+from database import Database
 from async_database import AsyncDatabase, try_enable_uvloop
 from scanner import start_scanner
 from ui import Dashboard
@@ -49,6 +47,13 @@ from queue_manager import create_queue
 # v2.2 新增模块
 from cache_manager import get_cache_manager, close_cache_manager, CacheConfig
 from batch_validator import BatchConfig
+from export_io import decrypt_keys, export_keys, export_keys_csv, export_keys_encrypted
+from use_boundary import (
+    check_authorization,
+    public_sources_allowed,
+    require_remote_scope,
+    storage_encryption_ready,
+)
 
 from loguru import logger
 
@@ -390,92 +395,6 @@ class OptimizedSecretScannerV22:
 #                          导出功能（保持兼容）
 # ============================================================================
 
-def export_keys(db_path: str, output_file: str, status_filter: str = None):
-    """导出 Key (明文)"""
-    from rich.console import Console
-
-    console = Console()
-    db = Database(db_path)
-
-    if status_filter:
-        try:
-            status = KeyStatus(status_filter)
-            keys = db.get_keys_by_status(status)
-        except ValueError:
-            console.print(f"[red]无效状态: {status_filter}[/]")
-            return
-    else:
-        keys = db.get_valid_keys()
-
-    if not keys:
-        console.print("[yellow]没有符合条件的 Key[/]")
-        return
-
-    with open(output_file, 'w', encoding='utf-8') as f:
-        f.write(f"# GitHub Secret Scanner 导出结果\n")
-        f.write(f"# 时间: {datetime.now().isoformat()}\n")
-        f.write(f"# 数量: {len(keys)}\n")
-        f.write("=" * 60 + "\n\n")
-
-        for key in keys:
-            f.write(f"平台: {key.platform}\n")
-            f.write(f"状态: {key.status}\n")
-            f.write(f"Key: {key.api_key}\n")
-            f.write(f"URL: {key.base_url}\n")
-            f.write(f"信息: {key.balance}\n")
-            f.write(f"来源: {key.source_url}\n")
-            f.write("-" * 40 + "\n\n")
-
-    console.print(f"[green]✓ 已导出 {len(keys)} 个 Key 到 {output_file}[/]")
-
-
-def export_keys_csv(db_path: str, output_file: str, status_filter: str = None):
-    """导出 Key 到 CSV 文件"""
-    from rich.console import Console
-
-    console = Console()
-    db = Database(db_path)
-
-    if status_filter:
-        try:
-            status = KeyStatus(status_filter)
-            keys = db.get_keys_by_status(status)
-        except ValueError:
-            console.print(f"[red]无效状态: {status_filter}[/]")
-            return
-    else:
-        keys = db.get_valid_keys()
-
-    if not keys:
-        console.print("[yellow]没有符合条件的 Key[/]")
-        return
-
-    fieldnames = [
-        "id", "platform", "status", "api_key", "base_url", "balance",
-        "source_url", "model_tier", "rpm", "is_high_value", "found_time",
-    ]
-
-    with open(output_file, "w", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        for key in keys:
-            writer.writerow({
-                "id": getattr(key, "id", ""),
-                "platform": key.platform,
-                "status": key.status,
-                "api_key": key.api_key,
-                "base_url": key.base_url,
-                "balance": key.balance,
-                "source_url": key.source_url,
-                "model_tier": key.model_tier,
-                "rpm": key.rpm,
-                "is_high_value": int(bool(getattr(key, "is_high_value", False))),
-                "found_time": key.found_time.isoformat() if getattr(key, "found_time", None) else "",
-            })
-
-    console.print(f"[green]✓ 已导出 {len(keys)} 个 Key 到 CSV: {output_file}[/]")
-
-
 def show_stats(db_path: str):
     """显示统计"""
     from rich.console import Console
@@ -532,8 +451,12 @@ v2.1 优化（保留）:
         """
     )
 
-    parser.add_argument('--export', type=str, metavar='FILE', help='导出 Key 到文本文件')
-    parser.add_argument('--export-csv', type=str, metavar='CSV', help='导出 Key 到 CSV 文件')
+    parser.add_argument('--export', type=str, metavar='FILE', help='导出 Key 到文本文件（默认脱敏）')
+    parser.add_argument('--export-csv', type=str, metavar='CSV', help='导出 Key 到 CSV 文件（默认脱敏）')
+    parser.add_argument('--export-encrypted', type=str, metavar='FILE', help='加密导出 Key，密钥写到 FILE.key')
+    parser.add_argument('--decrypt', type=str, metavar='FILE', help='解密 --export-encrypted 生成的文件')
+    parser.add_argument('--key-file', type=str, metavar='KEY', help='解密用的密钥文件')
+    parser.add_argument('--reveal', action='store_true', help='导出时写入完整 Key（默认脱敏）')
     parser.add_argument('--status', type=str, help='导出状态过滤 (valid/quota_exceeded)')
     parser.add_argument('--stats', action='store_true', help='显示统计')
     parser.add_argument('--db', type=str, default='leaked_keys.db', help='数据库路径')
@@ -553,7 +476,11 @@ v2.1 优化（保留）:
     parser.add_argument('--searchcode', action='store_true', help='启用 SearchCode 扫描源')
     parser.add_argument('--gitlab', action='store_true', help='启用 GitLab Snippets 扫描源')
     parser.add_argument('--realtime', action='store_true', help='启用实时监控 (GitHub Events)')
-    parser.add_argument('--all-sources', action='store_true', help='启用所有扫描源')
+    parser.add_argument('--all-sources', action='store_true', help='启用所有扫描源（还需 --allow-public-sources）')
+    parser.add_argument('--allow-public-sources', action='store_true',
+                        help='允许无法按 org/repo 限定的公开源（Gist、Pastebin、GitLab、Searchcode、Events）')
+    parser.add_argument('--allow-plaintext-db', action='store_true',
+                        help='允许在未设置 DB_ENCRYPTION_KEY 时把凭据明文写入数据库')
     parser.add_argument('--authorized', action='store_true',
                         help='声明仅在授权范围内使用本工具（详见 AUTHORIZED_USE.md）')
 
@@ -574,12 +501,18 @@ v2.1 优化（保留）:
     args = parser.parse_args()
 
     # 使用边界确认（--authorized 或环境变量 SCANNER_AUTHORIZED=1 可跳过交互）
-    from use_boundary import check_authorization
     if not check_authorization(getattr(args, "authorized", False)):
         return
 
+    if args.proxy:
+        config.proxy_url = args.proxy
+    if args.db:
+        config.db_path = args.db
+
     # 本地资产扫描模式（目录 + 全量 Git 历史 → 统一验证管线）
     if args.scan_local:
+        if not storage_encryption_ready(args.allow_plaintext_db):
+            return
         from local_scanner import run_local_scan
         run_local_scan(args.scan_local, config.db_path,
                        scan_git_history=not args.no_git_history)
@@ -594,17 +527,21 @@ v2.1 优化（保留）:
         print(generate_report(config.db_path, args.report, reveal=args.reveal_report))
         return
 
-    if args.proxy:
-        config.proxy_url = args.proxy
-    if args.db:
-        config.db_path = args.db
+    # 导出模式（默认脱敏；完整值需要 --reveal）
+    if args.decrypt:
+        if not args.key_file:
+            print("[ABORT] --decrypt 需要同时提供 --key-file。")
+            return
+        decrypt_keys(args.decrypt, args.key_file)
+        return
 
-    # 导出模式
-    if args.export or args.export_csv:
+    if args.export or args.export_csv or args.export_encrypted:
         if args.export:
-            export_keys(config.db_path, args.export, args.status)
+            export_keys(config.db_path, args.export, args.status, reveal=args.reveal)
         if args.export_csv:
-            export_keys_csv(config.db_path, args.export_csv, args.status)
+            export_keys_csv(config.db_path, args.export_csv, args.status, reveal=args.reveal)
+        if args.export_encrypted:
+            export_keys_encrypted(config.db_path, args.export_encrypted, args.status)
         return
 
     # 统计模式
@@ -618,6 +555,15 @@ v2.1 优化（保留）:
     enable_searchcode = args.searchcode or args.all_sources
     enable_gitlab = args.gitlab or args.all_sources
     enable_realtime = args.realtime or args.all_sources
+    wants_public = any((
+        enable_pastebin, enable_gist, enable_searchcode, enable_gitlab, enable_realtime,
+    ))
+    if wants_public and not public_sources_allowed(args.allow_public_sources):
+        return
+    if not require_remote_scope(args.target_org or "", args.target_repo or ""):
+        return
+    if not storage_encryption_ready(args.allow_plaintext_db):
+        return
 
     scanner = OptimizedSecretScannerV22(
         enable_pastebin=enable_pastebin,

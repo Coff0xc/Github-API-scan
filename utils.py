@@ -21,12 +21,20 @@ from typing import Tuple
 # 熵值阈值
 ENTROPY_THRESHOLD = 3.8
 
-# 测试 Key 关键词
+# 测试 Key 关键词。scanner 导入本模块后会把这份名单替换成
+# 已合并 config.yaml 的同一列表，过滤逻辑只保留这一处实现。
 TEST_KEY_PATTERNS = [
     'test', 'demo', 'example', 'sample', 'fake', 'dummy', 'placeholder',
     'xxx', 'your_', 'your-', '<your', '{your', 'abcdef', '123456',
-    'insert', 'replace', 'xxxxxx', 'aaaaaa', 'dev_', 'dev-', 'staging',
-    'sandbox', 'tutorial', 'workshop', 'playground', 'temp_', 'tmp_', 'mock_', 'stub_',
+    'insert', 'replace', 'xxxxxx', 'aaaaaa',
+    'dev_', 'dev-', 'staging', 'sandbox', 'tutorial', 'workshop',
+    'playground', 'temp_', 'tmp_', 'mock_', 'stub_',
+    'changeme', 'fixme', 'todo', 'secret', 'password', 'credential',
+    'redacted', 'hidden', 'masked', 'obfuscated', 'censored',
+    'null', 'none', 'undefined', 'empty', 'blank',
+    'default', 'template', 'boilerplate', 'skeleton',
+    'api_key_here', 'your_api_key', 'enter_key', 'put_key',
+    'add_your', 'fill_in', 'replace_with', 'insert_your',
 ]
 
 # 域名黑名单
