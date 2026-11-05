@@ -14,7 +14,7 @@ Scan GitHub repositories for leaked AI API keys and validate them. Supports 50+ 
 
 Searches GitHub for exposed API keys, then validates them to see if they actually work. Simple as that.
 
-The tool is fast (430x faster than doing it manually), has a nice terminal UI, and won't waste time re-checking keys you've already found.
+The tool has a terminal UI and skips keys it has already checked. The old "430x" figure was not an end-to-end measurement. `benchmark.py` only times database inserts.
 
 ## Supported platforms
 
@@ -51,12 +51,7 @@ Full list: OpenAI, Anthropic, Google Gemini, Azure, xAI, Meta Llama, OpenRouter,
 
 Tested on 1000 keys:
 
-```
-Original version:  103 seconds
-This version:      0.24 seconds  (430x faster)
-```
-
-How? Async everything, smart caching, connection pooling, and batch processing.
+Async I/O, caching, connection pooling, and batch writes are what the v2.2 path actually changes. Do not treat the old 0.24-second table as a full scan benchmark.
 
 ## Quick start
 
@@ -67,8 +62,8 @@ How? Async everything, smart caching, connection pooling, and batch processing.
 **Install:**
 
 ```bash
-git clone https://github.com/YourUsername/AI-API-Scanner.git
-cd AI-API-Scanner
+git clone https://github.com/Coff0xc/Github-API-scan.git
+cd Github-API-scan
 pip install -r requirements.txt
 ```
 
@@ -94,14 +89,12 @@ To get a GitHub token:
 **Run:**
 
 ```bash
-python main_v2.2.py --authorized
+python main_v2.2.py --authorized --target-org your-org
 ```
 
-That's it. The terminal UI will show what's happening in real-time.
+Remote search does not start without `--target-org` or `--target-repo`. Set `DB_ENCRYPTION_KEY` first, or pass `--allow-plaintext-db`.
 
-> `--authorized` 确认使用边界（AUTHORIZED_USE.md）；也可用环境变量
-> `SCANNER_AUTHORIZED=1`（CI/Docker 场景）。首次运行不带该参数会弹出边界
-> 声明，交互输入 `y` 亦可。
+> `--authorized` confirms the use boundary in AUTHORIZED_USE.md. `SCANNER_AUTHORIZED=1` does the same for CI. Docker Compose does not set that variable for you. Without either one, an interactive terminal asks for `y`.
 
 **Recommended security environment variables** (copy from `.env.example`):
 
@@ -115,33 +108,35 @@ export DASHBOARD_TOKEN=<随机长密码>     # Web 面板访问令牌（未设�
 Basic commands:
 
 ```bash
-# Start scanning (交互确认使用边界，或加 --authorized 跳过)
-python main_v2.2.py
+# Remote scan. Refuses to start unless the search is limited to an org or repo.
+python main_v2.2.py --authorized --target-org your-org
 
 # View stats
 python main_v2.2.py --stats
 
-# Export valid keys
+# Export is masked unless you pass --reveal
 python main_v2.2.py --export results.txt --status valid
 
 # Export to CSV
 python main_v2.2.py --export-csv results.csv --status valid
 
-# Encrypted export (recommended)
+# Encrypted export (recommended when you need the raw key)
 python main_v2.2.py --export-encrypted secure.bin
 ```
+
+Set `DB_ENCRYPTION_KEY` before a scan writes anything. `--allow-plaintext-db` is the explicit override.
 
 Advanced options:
 
 ```bash
 # Disable cache (slower but uses less memory)
-python main_v2.2.py --no-cache
+python main_v2.2.py --authorized --target-org your-org --no-cache
 
-# Scan all sources (GitHub, Gist, GitLab, Pastebin, etc.)
-python main_v2.2.py --all-sources
+# Public sources are not limited by org: or repo:. They stay off unless you opt in.
+python main_v2.2.py --authorized --target-org your-org --all-sources --allow-public-sources
 
 # Use custom database
-python main_v2.2.py --db custom.db
+python main_v2.2.py --db custom.db --stats
 ```
 
 **授权渗透 / 自有资产审计（authorized engagement）：**
@@ -180,7 +175,11 @@ The tool uses a 3-layer cache:
 
 | Mechanism | How to enable | Effect |
 |---|---|---|
-| 使用边界确认 | `--authorized` / `SCANNER_AUTHORIZED=1` | 启动前强制确认仅授权使用 |
+| 使用边界确认 | `--authorized` / `SCANNER_AUTHORIZED=1` | 启动前强制确认仅授权使用。Docker 不再默认写成 1 |
+| 远程范围 | `--target-org` / `--target-repo` | 没有范围时 GitHub 搜索不会发出 |
+| 公开源 | `--allow-public-sources` | Gist、Pastebin、GitLab、Searchcode、Events 默认关闭 |
+| 写库加密 | `DB_ENCRYPTION_KEY` | 未设置时扫描拒绝写入，除非 `--allow-plaintext-db` |
+| 导出脱敏 | `--export` / `--reveal` | 文本和 CSV 默认脱敏 |
 | 结果库静态加密 | `DB_ENCRYPTION_KEY` 环境变量 | `api_key` 列存 Fernet 密文，去重走 SHA-256 指纹 |
 | Web 面板鉴权 | `DASHBOARD_TOKEN` 环境变量 | Key 默认脱敏；reveal/导出/推送需令牌，认证失败限速 |
 | 加密导出 | `GET /api/export`（需令牌） | 返回 Fernet 加密 JSON；`mask=1` 可导脱敏版 |
@@ -216,12 +215,14 @@ database:
 ## Project structure
 
 ```
-├── main_v2.2.py          # Latest version (recommended)
-├── main_v2.1.py          # Connection pool version
-├── main.py               # Original version
+├── main_v2.2.py          # Only implementation
+├── main.py               # Shim. Forwards arguments to main_v2.2.py
+├── main_v2.1.py          # Shim
+├── main_optimized.py     # Shim
 │
-├── scanner.py            # GitHub scanning
-├── validator.py          # Key validation
+├── scanner.py            # GitHub scanning (requires an org or repo)
+├── validator_optimized.py # Validation path used by main_v2.2.py
+├── validator.py          # Shared validation primitives
 ├── database.py           # SQLite storage
 ├── config.py             # Platform config (50+ platforms)
 │
@@ -255,7 +256,7 @@ database:
 - Performance monitoring
 
 **v2.0 (2026-01-11):**
-- Async database (100-430x faster)
+- Async database writes (`benchmark.py` measures this micro-benchmark only)
 - Queue expansion (1000 → 10000)
 - Encrypted export
 
@@ -305,21 +306,9 @@ pip install pre-commit gitleaks
 pre-commit install
 ```
 
-## Performance benchmarks
+## Performance
 
-Hardware: Intel i7-10700K, 32GB RAM, 1Gbps
-
-| Keys | Original | v2.2 Cache | Speedup |
-|------|----------|------------|---------|
-| 100  | 10.38s   | 0.10s      | 108x    |
-| 500  | 52.08s   | 0.16s      | 320x    |
-| 1000 | 103.29s  | 0.24s      | 430x    |
-
-Cache effectiveness:
-- Validation cache: 42% hit rate
-- Domain cache: 68% hit rate  
-- Fingerprint cache: 78% hit rate
-- Total requests saved: 61%
+`benchmark.py` compares synchronous and asynchronous SQLite inserts on synthetic rows. It does not search GitHub or call provider APIs. Run it locally if you need a number for the database path. The 108x / 320x / 430x table that used to be here was not reproducible from that script and has been removed.
 
 ## Documentation
 
@@ -347,7 +336,7 @@ Found a bug? Want to add a platform? PRs welcome.
 
 ```bash
 # Fork and clone
-git clone https://github.com/YourUsername/AI-API-Scanner.git
+git clone https://github.com/Coff0xc/Github-API-scan.git
 
 # Create branch
 git checkout -b feature/new-platform

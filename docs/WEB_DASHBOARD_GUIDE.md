@@ -39,7 +39,7 @@ The dashboard will be available at: **http://127.0.0.1:5000**
 In another terminal, start the scanner:
 
 ```bash
-python main_v2.2.py
+python main_v2.2.py --authorized --target-org your-org
 ```
 
 The dashboard will automatically display results from the database.
@@ -198,7 +198,7 @@ ls leaked_keys.db
 
 Run the scanner first to create the database:
 ```bash
-python main_v2.2.py
+python main_v2.2.py --authorized --target-org your-org
 ```
 
 ### No Data Showing

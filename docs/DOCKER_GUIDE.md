@@ -28,6 +28,8 @@ PROXY_URL=http://127.0.0.1:7890
 
 ### 3. Run with Docker Compose
 
+Compose does not set `SCANNER_AUTHORIZED`. Put `SCANNER_AUTHORIZED=1` in `.env` only after you accept AUTHORIZED_USE.md. Also set `DB_ENCRYPTION_KEY`. The scanner service command is `python main_v2.2.py` with no default org, so it exits until you add `--target-org` or `--target-repo` to that command.
+
 ```bash
 # Start both scanner and dashboard
 docker-compose up -d

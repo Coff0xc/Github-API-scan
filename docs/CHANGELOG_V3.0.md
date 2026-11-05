@@ -83,7 +83,7 @@
 - Dynamic queue management (30-50% memory reduction)
 
 **Database Performance:**
-- 100-430x speedup vs original version
+- Async SQLite writes. The old 100-430x claim was not an end-to-end scan result.
 - Async SQLite operations
 - Batch writes with configurable flush intervals
 
@@ -123,7 +123,7 @@ default_base_urls = {
 - **Platforms Supported:** 50+ (up from ~30)
 - **Regex Patterns:** 50+ (up from ~25)
 - **Search Queries:** 93 (up from ~70)
-- **Performance:** 430x faster than original (unchanged)
+- **Performance:** see `benchmark.py` for the database-insert micro-benchmark only
 - **Cache Hit Rate:** 30-50% (unchanged from v2.2)
 
 ## 🔄 Migration Guide
@@ -205,10 +205,8 @@ Thank you to all contributors and security researchers who reported issues and s
 
 ## 📞 Support
 
-- **Issues:** https://github.com/YourUsername/AI-API-Scanner/issues
-- **Security:** Report via GitHub Security Advisories
-- **Discussions:** https://github.com/YourUsername/AI-API-Scanner/discussions
+- **Issues:** https://github.com/Coff0xc/Github-API-scan/issues
 
 ---
 
-**Full Changelog:** [v2.2...v3.0](https://github.com/YourUsername/AI-API-Scanner/compare/v2.2...v3.0)
+Repository: https://github.com/Coff0xc/Github-API-scan

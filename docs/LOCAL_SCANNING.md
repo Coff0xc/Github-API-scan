@@ -58,6 +58,7 @@ python main_v2.2.py --authorized --target-repo customer-org/api-server
 ```bash
 # 1) 界定范围并声明授权
 set SCANNER_AUTHORIZED=1
+set DB_ENCRYPTION_KEY=choose-a-long-secret
 
 # 2) 客户本地资产（历史含已删除的密钥）
 python main_v2.2.py --scan-local D:\customer\monorepo --report P1_local_threats.md

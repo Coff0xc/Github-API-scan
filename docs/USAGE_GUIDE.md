@@ -30,14 +30,14 @@ GITHUB_TOKENS = [
 ### Step 3: Run Scanner
 
 ```bash
-# Basic scan
-python main_v2.2.py
+# Remote scan. This refuses to run without an org or a repo.
+python main_v2.2.py --authorized --target-org your-org
 
 # View current statistics
 python main_v2.2.py --stats
 
-# Scan with all sources (GitHub, Gist, GitLab, etc.)
-python main_v2.2.py --all-sources
+# Public sources cannot be limited with org: or repo:. Opt in explicitly.
+python main_v2.2.py --authorized --target-org your-org --all-sources --allow-public-sources
 ```
 
 ## What You'll See
@@ -113,7 +113,7 @@ The scanner uses 93 optimized queries targeting:
 
 ## Performance Expectations
 
-- **Speed:** Processes 1000 keys in ~0.24 seconds (430x faster than manual)
+- **Speed:** `benchmark.py` only times database inserts. It is not an end-to-end scan number.
 - **Cache:** 30-50% hit rate (skips already-validated keys)
 - **Network:** 61% fewer requests than naive approach
 - **Memory:** Efficient queue management, handles 10,000+ items
@@ -138,18 +138,18 @@ The scanner uses 93 optimized queries targeting:
 
 ```bash
 # Disable cache (use less memory)
-python main_v2.2.py --no-cache
+python main_v2.2.py --authorized --target-org your-org --no-cache
 
 # Custom database location
-python main_v2.2.py --db /path/to/custom.db
+python main_v2.2.py --db /path/to/custom.db --stats
 
 # Use proxy (for restricted networks)
 # Edit config_local.py:
 PROXY_URL = "http://127.0.0.1:7890"
 
-# Run with specific sources only
-python main_v2.2.py --gist  # GitHub Gist only
-python main_v2.2.py --gitlab  # GitLab only
+# Public sources stay off unless you opt in. They are not limited to --target-org.
+python main_v2.2.py --authorized --target-org your-org --gist --allow-public-sources
+python main_v2.2.py --authorized --target-org your-org --gitlab --allow-public-sources
 ```
 
 ## Performance Tuning
@@ -185,8 +185,8 @@ Not for:
 ## Next Steps
 
 1. **Configure your token** (see Step 1 above)
-2. **Run first scan**: `python main_v2.2.py`
-3. **Export results**: `python main_v2.2.py --export results.txt --status valid`
+2. **Run first scan**: `python main_v2.2.py --authorized --target-org your-org`
+3. **Export results** (masked unless `--reveal`): `python main_v2.2.py --export results.txt --status valid`
 4. **Report findings**: Use responsible disclosure
 
 ## Need Help?

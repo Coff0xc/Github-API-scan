@@ -29,7 +29,7 @@ ollama pull llama3.2:3b        # 或 qwen2.5:7b（中文上下文更好）
 
 # 2. 启用 AI 过滤并扫描
 export AI_FILTER_ENABLED=1
-python main_v2.2.py --authorized
+python main_v2.2.py --authorized --target-org your-org
 ```
 
 Ollama 不可用时自动降级为纯规则引擎（MockBackend），不会中断扫描。
@@ -42,7 +42,7 @@ export AI_DETECTOR_BACKEND=openai
 export OPENAI_API_KEY=sk-xxxx                 # 你的 AI API Key
 export AI_LLM_BASE_URL=https://api.openai.com/v1   # 可选，中转站填对应地址
 export AI_LLM_MODEL=gpt-3.5-turbo             # 可选，默认 gpt-3.5-turbo
-python main_v2.2.py --authorized
+python main_v2.2.py --authorized --target-org your-org
 ```
 
 任何 OpenAI 兼容端点（DeepSeek、月之暗面、one-api 中转等）都能用，改

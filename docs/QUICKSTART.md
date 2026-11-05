@@ -9,8 +9,8 @@
 ### 1. 克隆项目
 
 ```bash
-git clone <repository-url>
-cd github-secret-scanner-pro
+git clone https://github.com/Coff0xc/Github-API-scan.git
+cd Github-API-scan
 ```
 
 ### 2. 安装依赖
@@ -50,13 +50,16 @@ GITHUB_TOKENS = [
 
 ### 启动扫描
 
-```bash
-# 使用优化版
-python main_optimized.py
+唯一实现是 `main_v2.2.py`。`main.py`、`main_v2.1.py`、`main_optimized.py` 只把参数转交给它。
 
-# 或者重命名后使用
-mv main_optimized.py main.py
-python main.py
+远程扫描必须同时满足：
+
+- `--target-org` 或 `--target-repo`
+- `DB_ENCRYPTION_KEY`，或者你明确接受明文落盘时加 `--allow-plaintext-db`
+- `--authorized`，或交互输入 `y`，或环境变量 `SCANNER_AUTHORIZED=1`
+
+```bash
+python main_v2.2.py --authorized --target-org your-org
 ```
 
 ### 查看统计
@@ -158,14 +161,11 @@ python benchmark.py
 ### 扫描相关
 
 ```bash
-# 基础扫描
-python main_optimized.py
+# 基础扫描（必须带授权范围）
+python main_v2.2.py --authorized --target-org your-org
 
-# 启用额外扫描源
-python main_optimized.py --pastebin --gist
-
-# 指定扫描时长 (秒)
-timeout 3600 python main_optimized.py  # 扫描 1 小时
+# 公开源不能按组织限定，默认关闭
+python main_v2.2.py --authorized --target-org your-org --pastebin --gist --allow-public-sources
 ```
 
 ### 数据管理
