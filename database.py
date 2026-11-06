@@ -220,6 +220,17 @@ class Database:
                         logger.info(f"Added new column: {field_name}")
                     except sqlite3.OperationalError:
                         pass  # 字段已存在
+
+                try:
+                    cursor.execute(
+                        "ALTER TABLE leaked_keys ADD COLUMN disposition TEXT DEFAULT 'open'"
+                    )
+                except sqlite3.OperationalError:
+                    pass
+                cursor.execute(
+                    "UPDATE leaked_keys SET disposition = 'open' "
+                    "WHERE disposition IS NULL OR disposition = ''"
+                )
                 
                 # 创建索引
                 cursor.execute("""
@@ -517,6 +528,54 @@ class Database:
                     "statuses": statuses,
                     "platforms": platforms
                 }
+
+    def list_finding_sources(self) -> List[dict]:
+        """
+        代理管道用的行。只返回指纹、脱敏预览和位置，不返回明文 Key。
+        """
+        with self._lock:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT platform, key_hash, api_key, source_url, found_time, disposition
+                    FROM leaked_keys
+                    ORDER BY found_time DESC
+                """)
+                rows = []
+                for row in cursor.fetchall():
+                    stored = row["api_key"] or ""
+                    fingerprint = (row["key_hash"] or "").strip()
+                    if not fingerprint:
+                        plain = vault.decrypt(stored)
+                        fingerprint = vault.hash_key(plain) if plain else ""
+                    if not fingerprint:
+                        continue
+                    rows.append({
+                        "fingerprint": fingerprint,
+                        "platform": row["platform"] or "",
+                        "preview": vault.mask(stored),
+                        "location": row["source_url"] or "",
+                        "disposition": row["disposition"] or "open",
+                        "found_time": row["found_time"] or "",
+                    })
+                return rows
+
+    def set_disposition(self, fingerprint: str, disposition: str) -> bool:
+        """按指纹更新处置状态。指纹必须是 64 位十六进制。"""
+        fp = (fingerprint or "").strip().lower()
+        if disposition not in ("open", "notified", "rotated", "false_positive"):
+            return False
+        if len(fp) != 64 or any(c not in "0123456789abcdef" for c in fp):
+            return False
+        with self._lock:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE leaked_keys SET disposition = ? WHERE key_hash = ?",
+                    (disposition, fp),
+                )
+                conn.commit()
+                return cursor.rowcount == 1
     
     @staticmethod
     def _row_to_key(row: sqlite3.Row) -> LeakedKey:

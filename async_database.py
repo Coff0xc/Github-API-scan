@@ -76,6 +76,13 @@ class AsyncDatabase:
             except Exception as e:
                 logger.warning(f"key_hash 唯一索引创建失败（旧数据可能存在重复）: {e}")
 
+            try:
+                await db.execute(
+                    "ALTER TABLE leaked_keys ADD COLUMN disposition TEXT DEFAULT 'open'"
+                )
+            except Exception:
+                pass
+
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS scanned_blobs (
                     file_sha TEXT PRIMARY KEY,
