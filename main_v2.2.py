@@ -48,6 +48,7 @@ from queue_manager import create_queue
 from cache_manager import get_cache_manager, close_cache_manager, CacheConfig
 from batch_validator import BatchConfig
 from export_io import decrypt_keys, export_keys, export_keys_csv, export_keys_encrypted
+from findings_feed import apply_dispositions, set_one_disposition, write_findings
 from use_boundary import (
     check_authorization,
     public_sources_allowed,
@@ -493,6 +494,12 @@ v2.1 优化（保留）:
                         help='将 GitHub 搜索限定到指定组织（授权范围）')
     parser.add_argument('--target-repo', metavar='OWNER/REPO',
                         help='将 GitHub 搜索限定到指定仓库（优先级高于 --target-org）')
+    parser.add_argument('--findings-json', metavar='FILE',
+                        help='写出给代理读的发现 JSON（无明文 Key）')
+    parser.add_argument('--apply-dispositions', metavar='FILE',
+                        help='把代理写回的处置 JSON 按指纹更新到数据库')
+    parser.add_argument('--set-disposition', nargs=2, metavar=('FINGERPRINT', 'STATUS'),
+                        help='按指纹设置处置状态：open/notified/rotated/false_positive')
     parser.add_argument('--report', metavar='FILE',
                         help='生成 Markdown 威胁报告（存活凭据清单 + 处置建议）')
     parser.add_argument('--reveal-report', action='store_true',
@@ -525,6 +532,20 @@ v2.1 优化（保留）:
     if args.report:
         from threat_report import generate_report
         print(generate_report(config.db_path, args.report, reveal=args.reveal_report))
+        return
+
+    # 代理管道：只出脱敏发现，或按指纹写回处置状态。不启动扫描。
+    did_finding_op = False
+    if args.apply_dispositions:
+        print(apply_dispositions(config.db_path, args.apply_dispositions))
+        did_finding_op = True
+    if args.set_disposition:
+        print(set_one_disposition(config.db_path, args.set_disposition[0], args.set_disposition[1]))
+        did_finding_op = True
+    if args.findings_json:
+        print(write_findings(config.db_path, args.findings_json))
+        did_finding_op = True
+    if did_finding_op:
         return
 
     # 导出模式（默认脱敏；完整值需要 --reveal）

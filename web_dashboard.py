@@ -245,7 +245,7 @@ class DatabaseReader:
         return platforms
 
 
-db_reader = DatabaseReader()
+db_reader = DatabaseReader(os.getenv("DB_PATH", "leaked_keys.db"))
 
 
 # ============================================================================
@@ -287,6 +287,13 @@ def api_keys():
 
     result = db_reader.get_keys(status, platform, limit, offset, search, reveal=reveal)
     return jsonify(result)
+
+
+@app.route('/api/findings')
+def api_findings():
+    """代理只读发现。永远不含明文 Key，忽略任何 reveal 参数。"""
+    from findings_feed import build_document
+    return jsonify(build_document(db_reader.db_path))
 
 
 @app.route('/api/platforms')
