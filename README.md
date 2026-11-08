@@ -180,6 +180,7 @@ The tool uses a 3-layer cache:
 | 公开源 | `--allow-public-sources` | Gist、Pastebin、GitLab、Searchcode、Events 默认关闭 |
 | 写库加密 | `DB_ENCRYPTION_KEY` | 未设置时扫描拒绝写入，除非 `--allow-plaintext-db` |
 | 导出脱敏 | `--export` / `--reveal` | 文本和 CSV 默认脱敏 |
+| 代理管道 | `--findings-json` | 给 Grok Bot / Muse 的 JSON 不含明文 Key。说明见 [docs/AGENT_PIPELINE.md](docs/AGENT_PIPELINE.md) |
 | 结果库静态加密 | `DB_ENCRYPTION_KEY` 环境变量 | `api_key` 列存 Fernet 密文，去重走 SHA-256 指纹 |
 | Web 面板鉴权 | `DASHBOARD_TOKEN` 环境变量 | Key 默认脱敏；reveal/导出/推送需令牌，认证失败限速 |
 | 加密导出 | `GET /api/export`（需令牌） | 返回 Fernet 加密 JSON；`mask=1` 可导脱敏版 |
