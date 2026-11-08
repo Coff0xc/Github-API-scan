@@ -4,8 +4,7 @@
 进程入口使用 validator_optimized.start_validators。本文件提供熔断器、
 ValidationResult，以及各平台的 validate_key_async。不要新增第三套验证循环。
 
-validator_extended.py / validator_async.py / validator_deep.py / deep_validator.py
-不在默认扫描路径上。
+平台判断只留在本文件。扫描入口使用 validator_optimized.py。
 """
 
 import asyncio
@@ -399,9 +398,12 @@ class AsyncValidator:
             for suffix in ['.local', '.internal', '.corp', '.lan', '.home']:
                 if host.endswith(suffix):
                     return False
+            from utils import host_is_safe_to_contact
+            if not host_is_safe_to_contact(host):
+                return False
         except Exception:
             return False
-        
+
         # 无效域名黑名单
         invalid_domains = [
             'docs.djangoproject.com',

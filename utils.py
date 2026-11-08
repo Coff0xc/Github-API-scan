@@ -154,6 +154,54 @@ def has_sequential_chars(s: str, min_len: int = 6) -> bool:
     return False
 
 
+def host_is_safe_to_contact(host: str) -> bool:
+    """
+    验证请求只能打到公网地址。
+
+    字面量私有、链路本地、保留和元数据地址直接拒绝。
+    域名会解析出全部地址，任一落在这些范围里就拒绝。
+    localhost 和 127.0.0.1 保留给本机中转调试。
+    """
+    import ipaddress
+    import socket
+
+    if not host:
+        return False
+    normalized = host.strip("[]").lower().rstrip(".")
+    if normalized in ("localhost", "127.0.0.1", "::1"):
+        return True
+
+    def _blocked(ip: "ipaddress._BaseAddress") -> bool:
+        return (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_reserved
+            or ip.is_multicast
+            or ip.is_unspecified
+        )
+
+    try:
+        return not _blocked(ipaddress.ip_address(normalized))
+    except ValueError:
+        pass
+
+    try:
+        records = socket.getaddrinfo(normalized, None)
+    except socket.gaierror:
+        return False
+    if not records:
+        return False
+    for record in records:
+        try:
+            address = ipaddress.ip_address(record[4][0])
+        except ValueError:
+            return False
+        if _blocked(address):
+            return False
+    return True
+
+
 def clear_caches():
     """清理所有 LRU 缓存"""
     calculate_entropy.cache_clear()

@@ -219,6 +219,9 @@ class OptimizedAsyncValidator:
             for suffix in ['.local', '.internal', '.corp', '.lan', '.home']:
                 if host.endswith(suffix):
                     return False
+            from utils import host_is_safe_to_contact
+            if not host_is_safe_to_contact(host):
+                return False
         except Exception:
             return False
 

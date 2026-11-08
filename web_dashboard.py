@@ -13,7 +13,7 @@ Security model:
 --------------
 - DASHBOARD_TOKEN 环境变量设置访问令牌；未设置时进入"只读脱敏模式"，
   Key 永远脱敏显示、导出与 reveal 接口直接禁用。
-- 令牌通过 X-API-Token 请求头传递（也接受 ?token= 查询参数，便于浏览器）。
+- 令牌只通过 X-API-Token 请求头传递。不接受查询参数，避免令牌进访问日志。
 - DASHBOARD_HOST 默认 127.0.0.1；仅在你理解风险时改为 0.0.0.0。
 - /api/export 默认返回 Fernet 加密的 JSON（EXPORT_KEY 派生密钥，
   未设置 EXPORT_KEY 时从 DASHBOARD_TOKEN 派生），明文 key 不出网。
@@ -102,7 +102,8 @@ def _mask_key(api_key: str) -> str:
 # ---------------------------------------------------------------------------
 
 def _client_ip() -> str:
-    return request.headers.get("X-Forwarded-For", request.remote_addr or "?").split(",")[0].strip()
+    # 不信任 X-Forwarded-For。面板默认只绑本机，伪造该头不能换掉限速键。
+    return request.remote_addr or "?"
 
 
 def _auth_fail_limited(ip: str) -> bool:
@@ -128,9 +129,9 @@ def _auth_gate():
     if not AUTH_ENABLED:
         return jsonify({'error': '未配置 DASHBOARD_TOKEN，该接口已禁用'}), 403
 
-    supplied = request.headers.get("X-API-Token", "").strip() or request.args.get("token", "").strip()
+    supplied = request.headers.get("X-API-Token", "").strip()
     if not supplied:
-        return jsonify({'error': '缺少令牌（X-API-Token 头或 ?token=）'}), 401
+        return jsonify({'error': '缺少令牌（请求头 X-API-Token）'}), 401
 
     if hmac.compare_digest(DASHBOARD_TOKEN.encode(), supplied.encode()):
         return None

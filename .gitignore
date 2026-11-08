@@ -15,6 +15,9 @@ config_local.py
 !.env.example
 
 # Scan results
+findings.json
+dispositions.json
+*.key
 *_keys.txt
 *_keys.csv
 valid_keys*.txt
