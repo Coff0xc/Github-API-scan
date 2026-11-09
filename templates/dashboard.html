@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>API Key Scanner - Dashboard</title>
+    <title>发现记录</title>
     <link rel="stylesheet" href="/static/css/dashboard.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
@@ -11,7 +11,7 @@
     <div class="container">
         <!-- Header -->
         <header>
-            <h1>🔍 API Key Scanner Dashboard</h1>
+            <h1>发现记录</h1>
             <div class="status" id="status">
                 <span class="status-indicator"></span>
                 <span id="status-text">Idle</span>
@@ -21,31 +21,31 @@
         <!-- Stats Cards -->
         <div class="stats-grid">
             <div class="stat-card">
-                <div class="stat-label">Total Keys</div>
-                <div class="stat-value" id="total-keys">0</div>
+                <div class="stat-label">全部</div>
+                <div class="stat-value" id="total-findings">0</div>
             </div>
-            <div class="stat-card valid">
-                <div class="stat-label">Valid Keys</div>
-                <div class="stat-value" id="valid-keys">0</div>
+            <div class="stat-card open">
+                <div class="stat-label">待处置</div>
+                <div class="stat-value" id="open-findings">0</div>
             </div>
-            <div class="stat-card high-value">
-                <div class="stat-label">High Value</div>
-                <div class="stat-value" id="high-value-keys">0</div>
+            <div class="stat-card notified">
+                <div class="stat-label">已通知</div>
+                <div class="stat-value" id="notified-findings">0</div>
             </div>
-            <div class="stat-card invalid">
-                <div class="stat-label">Invalid</div>
-                <div class="stat-value" id="invalid-keys">0</div>
+            <div class="stat-card rotated">
+                <div class="stat-label">已轮换</div>
+                <div class="stat-value" id="rotated-findings">0</div>
             </div>
         </div>
 
         <!-- Charts -->
         <div class="charts-grid">
             <div class="chart-card">
-                <h3>Platform Distribution</h3>
+                <h3>平台</h3>
                 <canvas id="platformChart"></canvas>
             </div>
             <div class="chart-card">
-                <h3>Status Breakdown</h3>
+                <h3>处置状态</h3>
                 <canvas id="statusChart"></canvas>
             </div>
         </div>
@@ -53,42 +53,46 @@
         <!-- Filters and Search -->
         <div class="controls">
             <div class="filter-group">
-                <label>Status:</label>
-                <select id="filter-status">
-                    <option value="">All</option>
-                    <option value="valid">Valid</option>
-                    <option value="invalid">Invalid</option>
-                    <option value="quota_exceeded">Quota Exceeded</option>
+                <label>处置</label>
+                <select id="filter-disposition">
+                    <option value="">全部</option>
+                    <option value="open">待处置</option>
+                    <option value="notified">已通知</option>
+                    <option value="rotated">已轮换</option>
+                    <option value="false_positive">误报</option>
                 </select>
             </div>
             <div class="filter-group">
-                <label>Platform:</label>
+                <label>平台</label>
                 <select id="filter-platform">
-                    <option value="">All</option>
+                    <option value="">全部</option>
                 </select>
             </div>
             <div class="filter-group">
-                <input type="text" id="search-input" placeholder="Search keys or URLs...">
+                <input type="text" id="search-input" placeholder="指纹、位置或预览">
             </div>
-            <button id="export-btn" class="btn-export">📥 Export</button>
+            <div class="filter-group">
+                <label for="dashboard-token">令牌</label>
+                <input type="password" id="dashboard-token" autocomplete="current-password" placeholder="X-API-Token">
+            </div>
+            <span id="disposition-message" class="stat-label"></span>
         </div>
 
         <!-- Keys Table -->
         <div class="table-container">
-            <table id="keys-table">
+            <table id="findings-table">
                 <thead>
                     <tr>
-                        <th>Platform</th>
-                        <th>API Key</th>
-                        <th>Status</th>
-                        <th>Info</th>
-                        <th>Source</th>
-                        <th>Found Time</th>
+                        <th>指纹</th>
+                        <th>平台</th>
+                        <th>预览</th>
+                        <th>位置</th>
+                        <th>处置</th>
                     </tr>
                 </thead>
-                <tbody id="keys-tbody">
+                <tbody id="findings-tbody">
                     <tr>
-                        <td colspan="6" class="loading">Loading...</td>
+                        <td colspan="5" class="loading">加载中</td>
                     </tr>
                 </tbody>
             </table>

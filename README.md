@@ -81,7 +81,7 @@ OpenAI、Anthropic、Gemini、Azure OpenAI、xAI、Meta Llama、OpenRouter、Por
 
 优先级是内置默认值，然后 `config.yaml`，然后 `config_local.py`，最后是命令行。`config.yaml` 里的熵阈值、并发、黑名单和批量写入会被读进去。
 
-本机面板默认是 `127.0.0.1:5000`。令牌只放在请求头 `X-API-Token`。
+本机面板默认是 `127.0.0.1:5000`，打开后是发现记录，不是密钥表。在页面上改处置状态时，把 `DASHBOARD_TOKEN` 填进令牌框，请求只带指纹和状态。令牌只放在请求头 `X-API-Token`。
 
 ## 代码从哪读
 

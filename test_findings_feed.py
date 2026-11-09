@@ -166,10 +166,78 @@ def test_notice_and_channel_omit_secret():
     assert LOCATION in blob
 
 
+def test_disposition_post_uses_fingerprint_only():
+    import web_dashboard
+    from key_vault import vault
+
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = str(Path(tmp) / "keys.db")
+        _seed(db_path)
+        fingerprint = vault.hash_key(SECRET)
+        web_dashboard.db_reader.db_path = db_path
+        web_dashboard.DASHBOARD_TOKEN = "panel-token"
+        web_dashboard.AUTH_ENABLED = True
+        client = web_dashboard.app.test_client()
+
+        missing = client.post(
+            "/api/findings/disposition",
+            json={"fingerprint": fingerprint, "disposition": "rotated"},
+        )
+        assert missing.status_code == 401
+
+        response = client.post(
+            "/api/findings/disposition",
+            headers={"X-API-Token": "panel-token"},
+            json={
+                "fingerprint": fingerprint,
+                "disposition": "rotated",
+                "api_key": SECRET,
+            },
+        )
+        body = response.get_json()
+        encoded = json.dumps(body)
+        assert response.status_code == 200
+        assert body == {
+            "ok": True,
+            "fingerprint": fingerprint,
+            "disposition": "rotated",
+        }
+        assert SECRET not in encoded
+        assert "api_key" not in body
+        from findings_feed import build_document
+        assert build_document(db_path)["findings"][0]["disposition"] == "rotated"
+
+        rejected = client.post(
+            "/api/findings/disposition",
+            headers={"X-API-Token": "panel-token"},
+            json={"fingerprint": fingerprint, "disposition": "use-it"},
+        )
+        assert rejected.status_code == 400
+
+
+def test_dashboard_home_lists_findings():
+    import web_dashboard
+
+    client = web_dashboard.app.test_client()
+    html = client.get("/").get_data(as_text=True)
+    script = client.get("/static/js/dashboard.js").get_data(as_text=True)
+    assert "发现记录" in html
+    assert "指纹" in html
+    assert "预览" in html
+    assert "处置" in html
+    assert "High Value" not in html
+    assert ">API Key<" not in html
+    assert "export-btn" not in html
+    assert "/api/findings" in script
+    assert "/api/keys" not in script
+
+
 if __name__ == "__main__":
     test_parse_github_blob_and_gist()
     test_export_has_no_secret_and_round_trips_disposition()
     test_http_findings_ignore_reveal()
     test_cli_writes_findings()
     test_notice_and_channel_omit_secret()
+    test_dashboard_home_lists_findings()
+    test_disposition_post_uses_fingerprint_only()
     print("findings feed ok")

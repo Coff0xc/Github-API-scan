@@ -85,8 +85,22 @@ header h1 {
     border-left-color: var(--success);
 }
 
-.stat-card.high-value {
+.stat-card.open {
+    border-left-color: var(--primary);
+}
+
+.stat-card.notified {
     border-left-color: var(--warning);
+}
+
+.stat-card.rotated {
+    border-left-color: var(--success);
+}
+
+.fingerprint {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+    word-break: break-all;
 }
 
 .stat-card.invalid {
@@ -257,6 +271,26 @@ tbody td {
 .status-quota {
     background: #fef3c7;
     color: #92400e;
+}
+
+.status-open {
+    background: #dbeafe;
+    color: #1e3a8a;
+}
+
+.status-notified {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.status-rotated {
+    background: #d1fae5;
+    color: #065f46;
+}
+
+.status-false_positive {
+    background: #e5e7eb;
+    color: #374151;
 }
 
 .key-text {

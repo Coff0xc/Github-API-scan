@@ -178,13 +178,31 @@ class DatabaseReader:
             'invalid_keys': cursor.execute('SELECT COUNT(*) FROM leaked_keys WHERE status = "invalid"').fetchone()[0],
             'quota_exceeded': cursor.execute('SELECT COUNT(*) FROM leaked_keys WHERE status = "quota_exceeded"').fetchone()[0],
             'high_value_keys': cursor.execute('SELECT COUNT(*) FROM leaked_keys WHERE is_high_value = 1').fetchone()[0],
+            'dispositions': {
+                'open': 0,
+                'notified': 0,
+                'rotated': 0,
+                'false_positive': 0,
+            },
         }
 
-        # Platform breakdown
+        try:
+            cursor.execute('''
+                SELECT COALESCE(NULLIF(disposition, ''), 'open') AS disposition, COUNT(*) AS count
+                FROM leaked_keys
+                GROUP BY 1
+            ''')
+            for row in cursor.fetchall():
+                name = row['disposition'] if isinstance(row, sqlite3.Row) else row[0]
+                count = row['count'] if isinstance(row, sqlite3.Row) else row[1]
+                if name in stats['dispositions']:
+                    stats['dispositions'][name] = count
+        except sqlite3.OperationalError:
+            pass
+
         cursor.execute('''
             SELECT platform, COUNT(*) as count
             FROM leaked_keys
-            WHERE status = "valid"
             GROUP BY platform
             ORDER BY count DESC
             LIMIT 10
@@ -295,6 +313,33 @@ def api_findings():
     """代理只读发现。永远不含明文 Key，忽略任何 reveal 参数。"""
     from findings_feed import build_document
     return jsonify(build_document(db_reader.db_path))
+
+
+@app.route('/api/findings/disposition', methods=['POST'])
+def api_set_finding_disposition():
+    """按指纹更新处置状态。请求体只使用 fingerprint 和 disposition，响应不带回密钥。"""
+    gate = _auth_gate()
+    if gate:
+        return gate
+
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({'error': '需要 JSON 对象'}), 400
+
+    from database import Database
+    from findings_feed import DISPOSITIONS
+
+    fingerprint = payload.get('fingerprint') or ''
+    disposition = (payload.get('disposition') or '').strip()
+    if disposition not in DISPOSITIONS:
+        return jsonify({'error': '处置状态无效'}), 400
+    if not Database(db_reader.db_path).set_disposition(str(fingerprint), disposition):
+        return jsonify({'error': '没有匹配的指纹，或指纹不是 64 位十六进制'}), 404
+    return jsonify({
+        'ok': True,
+        'fingerprint': str(fingerprint).strip().lower(),
+        'disposition': disposition,
+    })
 
 
 @app.route('/api/platforms')
