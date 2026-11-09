@@ -110,12 +110,12 @@ class KeyInfo:
         if balance_value >= 10 or self.is_high_value:
             return Severity.HIGH
 
-        # Medium: 普通有效 Key
-        if self.model_tier and 'quota' not in self.balance.lower():
-            return Severity.MEDIUM
-
-        # Low: 配额耗尽
-        return Severity.LOW
+        # 余额文本里写了 quota，视为配额耗尽。
+        # 其余情况至少是 medium：扫描现在不写余额和模型档位，
+        # 若落成 low，示例配置的 min_severity: medium 会把处置通知丢掉。
+        if "quota" in (self.balance or "").lower():
+            return Severity.LOW
+        return Severity.MEDIUM
 
 
 # ============================================================================
