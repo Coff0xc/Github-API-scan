@@ -258,42 +258,63 @@ class ScanResult:
 #                              工具函数
 # ============================================================================
 
-@lru_cache(maxsize=2048)
 def decode_bpe_variants(text: str) -> str:
-    """
-    BPE 引擎：解码常见编码变体以提高召回率 (+28%)
+    """解码 URL、Unicode 和反斜杠转义。短文本走缓存，大文件不进缓存。"""
+    if not text:
+        return text
+    if len(text) > 8192:
+        return _decode_bpe_variants(text)
+    return _decode_bpe_variants_cached(text)
 
-    处理场景：
-    1. URL 编码: %2F, %3A, %2B
-    2. Unicode 转义: \\u0073\\u006B
-    3. Base64 片段混淆
-    4. 反斜杠转义: \\/
 
-    Args:
-        text: 原始文本
+@lru_cache(maxsize=2048)
+def _decode_bpe_variants_cached(text: str) -> str:
+    return _decode_bpe_variants(text)
 
-    Returns:
-        解码后的文本
-    """
+
+def _decode_bpe_variants(text: str) -> str:
     import urllib.parse
 
-    # 1. URL 解码 (处理 %2F %3A %2B 等)
     try:
         decoded = urllib.parse.unquote(text)
-    except:
+    except Exception:
         decoded = text
 
-    # 2. Unicode 转义解码 (\\uXXXX)
-    if '\\u' in decoded:
+    if "\\u" in decoded:
         try:
-            decoded = decoded.encode().decode('unicode-escape')
-        except:
+            decoded = decoded.encode().decode("unicode-escape")
+        except Exception:
             pass
 
-    # 3. 反斜杠转义清理 (\/ -> /)
-    decoded = decoded.replace('\\/', '/').replace('\\-', '-')
+    return decoded.replace("\\/", "/").replace("\\-", "-")
 
-    return decoded
+
+def content_variants(text: str):
+    """原文一定扫。解码结果只有和原文不同时才再扫一遍。"""
+    yield text
+    decoded = decode_bpe_variants(text)
+    if decoded != text:
+        yield decoded
+
+
+def select_key_matches(patterns, text):
+    """同一段文本里，被更长命中包住的短命中不再单独留下。"""
+    found = []
+    for platform, pattern in patterns.items():
+        if platform == "azure":
+            continue
+        for match in pattern.finditer(text):
+            found.append((match.start(), match.end(), platform, match.group(0)))
+    found.sort(key=lambda item: (item[1] - item[0], item[0]), reverse=True)
+    covered = []
+    chosen = []
+    for start, end, platform, key in found:
+        if any(start >= span_start and end <= span_end for span_start, span_end in covered):
+            continue
+        covered.append((start, end))
+        chosen.append((start, end, platform, key))
+    chosen.sort(key=lambda item: item[0])
+    return chosen
 
 
 # ============================================================================
@@ -778,24 +799,13 @@ class GitHubScanner:
         """
         从代码内容提取 Key
 
-        优化：预过滤提前 + BPE 解码
-        1. BPE 解码常见编码变体 (+28% 召回率)
-        2. 先检查内存缓存（最快）
-        3. 再检查数据库（提前丢弃已入库 Key，减轻验证队列压力）
+        先用内存和数据库丢掉已经见过的密钥，再做熵过滤。
+        解码只在结果和原文不同时再扫一遍。
         """
         results = []
 
-        # ========== P1: BPE 引擎 - 解码编码变体 (+28% 召回率) ==========
-        decoded_content = decode_bpe_variants(content)
-
-        for platform, pattern in self._key_patterns.items():
-            if platform == "azure":
-                continue
-
-            # 在原始内容和解码内容中都搜索
-            for content_variant in [content, decoded_content]:
-                for match in pattern.finditer(content_variant):
-                    api_key = match.group(0)
+        for content_variant in content_variants(content):
+            for start, end, platform, api_key in select_key_matches(self._key_patterns, content_variant):
 
                     # ========== 优化：预过滤提前 ==========
                     # 1. 内存缓存检查（最快）
@@ -819,7 +829,7 @@ class GitHubScanner:
                         continue
 
                     # 提取上下文
-                    context = self._extract_context(content_variant, match.start())
+                    context = self._extract_context(content_variant, start)
 
                     # 检查 Azure
                     is_azure = self._is_azure_context(context)

@@ -14,7 +14,7 @@
 import sqlite3
 import threading
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Set, Iterable
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
@@ -318,6 +318,28 @@ class Database:
                 cursor = conn.cursor()
                 cursor.execute("SELECT COUNT(*) FROM scanned_blobs")
                 return cursor.fetchone()[0]
+
+    def load_scanned_blob_shas(self) -> Set[str]:
+        """一次读出已扫描 blob，避免逐个文件查库。"""
+        with self._lock:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT file_sha FROM scanned_blobs")
+                return {row[0] for row in cursor.fetchall() if row[0]}
+
+    def mark_blobs_scanned(self, file_shas: Iterable[str]) -> None:
+        """批量标记已扫描 blob。"""
+        rows = [(sha, datetime.now().isoformat()) for sha in file_shas if sha]
+        if not rows:
+            return
+        with self._lock:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.executemany(
+                    "INSERT OR IGNORE INTO scanned_blobs (file_sha, scan_time) VALUES (?, ?)",
+                    rows,
+                )
+                conn.commit()
     
     # ========================================================================
     #                           Key 去重 (第二层防御)
