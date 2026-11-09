@@ -1609,9 +1609,9 @@ class AsyncValidator:
     
     async def process_result(self, result: 'ScanResult'):
         """
-        异步处理单个结果
-        
-        包含第二层去重防御：在验证前检查 Key 是否已存在于数据库
+        异步处理单个结果。
+
+        入库前按密钥去重。验证结果只回写状态、模型档位和 RPM。
         """
         async with self.semaphore:
             masked = mask_key(result.api_key)
@@ -1639,76 +1639,38 @@ class AsyncValidator:
                 self._log(f"[SKIP] Key 插入冲突: {masked}", "SKIP")
                 return
             
-            # 验证
+            # 验证。状态以这一次检查为准，不再额外探测余额或 GPT-4。
             self._log(f"验证 {masked}...", "INFO")
             vr = await self.validate_single(result)
-            
-            # 深度探测（仅对有效的 OpenAI/Relay Key）
-            if vr.status == KeyStatus.VALID and result.platform.lower() in ['openai', 'relay']:
-                # 并行探测 GPT-4 和余额
-                gpt4_task = asyncio.create_task(self.probe_gpt4(result.api_key, result.base_url))
-                billing_task = asyncio.create_task(self.probe_billing(result.api_key, result.base_url))
-                quota_task = asyncio.create_task(self.probe_quota_by_request(result.api_key, result.base_url))
-                
-                has_gpt4, billing_result, quota_result = await asyncio.gather(
-                    gpt4_task, billing_task, quota_task
-                )
-                
-                if has_gpt4:
-                    vr.model_tier = "GPT-4"
-                    vr.is_high_value = True
-                
-                # 使用余额检测结果
-                if billing_result.get('balance', 0) > 0:
-                    vr.balance_usd = billing_result['balance']
-                    vr.is_high_value = True
-                
-                # 使用实际请求测试结果更新状态
-                if not quota_result.get('has_quota', True):
-                    if quota_result.get('error_type') == 'quota':
-                        vr.status = KeyStatus.QUOTA_EXCEEDED
-                        vr.info = quota_result.get('message', '配额耗尽')
-                    elif quota_result.get('error_type') == 'auth':
-                        vr.status = KeyStatus.INVALID
-                        vr.info = '认证失败'
-            
-            # 更新数据库
-            balance_str = vr.info
-            if vr.balance_usd > 0:
-                balance_str = f"${vr.balance_usd:.2f} | {vr.info}"
-            if vr.model_tier:
-                balance_str = f"{vr.model_tier} | {balance_str}"
-            
+
             self.db.update_key_status(
-                result.api_key, 
-                vr.status, 
-                balance_str,
+                result.api_key,
+                vr.status,
+                "",
                 model_tier=vr.model_tier,
                 rpm=vr.rpm,
-                is_high_value=vr.is_high_value
+                is_high_value=False,
             )
-            
-            # 更新 UI
+
+            # 更新 UI。余额和高价值不进入界面。
             if self.dashboard:
                 source_short = result.source_url.split('/')[-1] if '/' in result.source_url else result.source_url
-                
+
                 if vr.status == KeyStatus.VALID:
                     self.dashboard.add_valid_key(
                         platform=result.platform,
                         masked_key=masked,
-                        balance=balance_str,
                         source=source_short,
-                        is_high_value=vr.is_high_value
+                        status="valid",
                     )
-                    level = "VALID" if not vr.is_high_value else "HIGH"
-                    self._log(f"✓ 有效! {vr.model_tier or result.platform.upper()} {masked}", level)
-                
+                    self._log(f"✓ 有效! {vr.model_tier or result.platform.upper()} {masked}", "VALID")
+
                 elif vr.status == KeyStatus.QUOTA_EXCEEDED:
                     self.dashboard.add_valid_key(
                         platform=result.platform,
                         masked_key=masked,
-                        balance=f"配额耗尽",
-                        source=source_short
+                        source=source_short,
+                        status="quota_exceeded",
                     )
                     self.dashboard.increment_stat("quota_exceeded")
                     self._log(f"⚠ 配额耗尽 {masked}", "WARN")
