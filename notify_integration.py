@@ -133,20 +133,14 @@ class NotifyIntegration:
         if status not in ["valid", "quota_exceeded"]:
             return {"skipped": True, "reason": "status_not_notifiable"}
 
-        # 创建 KeyInfo 对象
+        # 渠道只看脱敏预览和位置。api_key 传给 KeyInfo 只为了在本进程里计算预览，发送路径会丢掉它。
         key_info = KeyInfo(
             platform=platform,
             api_key=api_key,
-            base_url=base_url,
-            model_tier=model_tier,
-            balance=balance,
-            rpm=rpm,
             source_url=source_url,
-            is_high_value=is_high_value,
             found_time=datetime.now()
         )
 
-        # 发送通知
         try:
             results = await self.notifier.notify(key_info)
             return results
@@ -191,6 +185,50 @@ def get_notify_integration(config_path: str = None) -> NotifyIntegration:
         _notify_integration = NotifyIntegration(config_path)
 
     return _notify_integration
+
+
+def configured_notifier():
+    """只在用户写了通知配置或环境变量时才建渠道。没有配置就不发，也不写桌面密钥文件。"""
+    import os
+
+    config_path = os.getenv("NOTIFY_CONFIG", "notify_config.yaml")
+    if Path(config_path).exists():
+        return init_notifier(config_path)
+    has_env = any(os.getenv(name) for name in (
+        "DISCORD_WEBHOOK",
+        "SLACK_WEBHOOK",
+        "TELEGRAM_BOT_TOKEN",
+        "FEISHU_WEBHOOK",
+        "DINGTALK_WEBHOOK",
+        "SERVERCHAN_KEY",
+        "BARK_DEVICE_KEY",
+    ))
+    if has_env:
+        return create_notifier_from_env()
+    return None
+
+
+async def disclose_finding(db_path: str, platform: str, api_key: str, source_url: str) -> dict:
+    """验证表明该授权资产上的密钥仍然可用时，通知位置和预览，并标为 notified。"""
+    notifier = configured_notifier()
+    if notifier is None or not notifier.channels:
+        return {"skipped": True, "reason": "notifier_not_configured"}
+
+    from key_vault import vault
+    from database import Database
+
+    fingerprint = vault.hash_key(api_key)
+    key_info = KeyInfo(platform=platform or "", api_key=api_key, source_url=source_url or "")
+    try:
+        results = await notifier.notify(key_info)
+    except Exception as exc:
+        logger.error(f"发送处置通知失败: {exc}")
+        return {"error": str(exc)}
+
+    sent = any(name != "skipped" and value is True for name, value in results.items())
+    if sent and not Database(db_path).set_disposition(fingerprint, "notified"):
+        logger.warning("通知已发出，但没有把指纹标为 notified")
+    return results
 
 
 def init_notify_integration(config_path: str = None) -> NotifyIntegration:

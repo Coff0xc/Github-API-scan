@@ -523,6 +523,7 @@ v2.1 优化（保留）:
         from local_scanner import run_local_scan
         run_local_scan(args.scan_local, config.db_path,
                        scan_git_history=not args.no_git_history)
+        print(write_findings(config.db_path, args.findings_json or "findings.json"))
         if args.report:
             from threat_report import generate_report
             print(generate_report(config.db_path, args.report, reveal=args.reveal_report))
@@ -534,7 +535,8 @@ v2.1 优化（保留）:
         print(generate_report(config.db_path, args.report, reveal=args.reveal_report))
         return
 
-    # 代理管道：只出脱敏发现，或按指纹写回处置状态。不启动扫描。
+    # 代理管道：没有扫描目标时，只出脱敏发现或按指纹写回。有扫描目标时，扫完再写 findings。
+    wants_scan = bool(args.scan_local or args.target_org or args.target_repo)
     did_finding_op = False
     if args.apply_dispositions:
         print(apply_dispositions(config.db_path, args.apply_dispositions))
@@ -542,10 +544,10 @@ v2.1 优化（保留）:
     if args.set_disposition:
         print(set_one_disposition(config.db_path, args.set_disposition[0], args.set_disposition[1]))
         did_finding_op = True
-    if args.findings_json:
+    if args.findings_json and not wants_scan:
         print(write_findings(config.db_path, args.findings_json))
         did_finding_op = True
-    if did_finding_op:
+    if did_finding_op and not wants_scan:
         return
 
     # 导出模式（默认脱敏；完整值需要 --reveal）
@@ -605,6 +607,7 @@ v2.1 优化（保留）:
         logger.info("动态队列已禁用")
 
     scanner.start()
+    print(write_findings(config.db_path, args.findings_json or "findings.json"))
 
 
 if __name__ == "__main__":

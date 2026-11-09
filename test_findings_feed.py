@@ -127,9 +127,49 @@ def test_cli_writes_findings():
         assert "findings.v1" in text
 
 
+def test_notice_and_channel_omit_secret():
+    import asyncio
+    from findings_feed import disclosure_notice
+    from notifier_v2 import KeyInfo, NotificationChannel, NotifierV2
+
+    text = disclosure_notice("openai", "sk-pro...cret", LOCATION)
+    assert SECRET not in text
+    assert LOCATION in text
+    assert "没有完整密钥" in text
+
+    class Capture(NotificationChannel):
+        def __init__(self):
+            super().__init__("capture")
+            self.sent = []
+
+        async def send(self, key_info, message=""):
+            self.sent.append(key_info.api_key + message)
+            return True
+
+        async def send_report(self, title, content):
+            self.sent.append(title + "\n" + content)
+            return True
+
+    notifier = NotifierV2()
+    channel = Capture()
+    notifier.channels.append(channel)
+    asyncio.run(notifier.notify(KeyInfo(
+        platform="openai",
+        api_key=SECRET,
+        source_url=LOCATION,
+        balance="$100",
+        is_high_value=True,
+    )))
+    blob = "\n".join(channel.sent)
+    assert SECRET not in blob
+    assert "$100" not in blob
+    assert LOCATION in blob
+
+
 if __name__ == "__main__":
     test_parse_github_blob_and_gist()
     test_export_has_no_secret_and_round_trips_disposition()
     test_http_findings_ignore_reveal()
     test_cli_writes_findings()
+    test_notice_and_channel_omit_secret()
     print("findings feed ok")

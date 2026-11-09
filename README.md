@@ -1,6 +1,6 @@
 # AI API Key Scanner
 
-在你拥有或已获授权的 GitHub 组织、仓库或本地目录里，找出提交进去的 API 密钥。唯一入口是 `main_v2.2.py`。
+在授权范围内找出泄露的 API 密钥，配对中转地址，扫描结束给出脱敏发现记录。唯一入口是 `main_v2.2.py`。范围是你拥有或已获授权的 GitHub 组织、仓库，或本机目录。
 
 程序先把密钥和它旁边的 `base_url` 配成一对，再按 [AUTHORIZED_USE.md](AUTHORIZED_USE.md) 的边界决定要不要向该地址发验证请求。结果进本地 SQLite。交给人或代理的默认材料是脱敏发现记录，不是一套能直接调用的密钥。
 
@@ -16,7 +16,7 @@
 3. **过滤。** 熵和路径黑名单去掉 `sk-test`、文档占位符和明显的假值。
 4. **验证。** 只应对授权资产这么做。验证结果是 `pending`、`valid`、`invalid` 或 `quota_exceeded`。对别人的密钥做「是否有效」不在允许范围内。
 5. **入库。** 设置 `DB_ENCRYPTION_KEY` 后，`api_key` 列是 Fernet 密文，去重用 SHA-256。未设置时扫描拒绝写入，除非显式加上 `--allow-plaintext-db`。
-6. **交出。** `--findings-json` 只有指纹、平台、脱敏预览、仓库、路径、提交、链接、处置状态和发现时间。处置状态是 `open`、`notified`、`rotated`、`false_positive`。
+6. **交出。** 扫描结束会写出 `findings.json`。里面只有指纹、平台、脱敏预览、仓库、路径、提交、链接、处置状态和发现时间。处置状态是 `open`、`notified`、`rotated`、`false_positive`。配了通知渠道时，可用密钥会发出平台、预览和位置，然后标成 `notified`。确认吊销后用 `--set-disposition <指纹> rotated`。余额和高价值不写入结果。
 
 `--report` 生成的是授权评估用的威胁报告，默认脱敏。完整密钥只在 `--reveal` 或 `--reveal-report` 时出现。
 
@@ -53,6 +53,7 @@ python main_v2.2.py --authorized --scan-local D:\repos\target
 ```bash
 python main_v2.2.py --stats
 python main_v2.2.py --findings-json findings.json
+python main_v2.2.py --set-disposition <64位指纹> rotated
 python main_v2.2.py --set-disposition <64位指纹> notified
 python main_v2.2.py --apply-dispositions dispositions.json
 

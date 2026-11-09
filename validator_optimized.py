@@ -611,23 +611,33 @@ async def optimized_validator_worker(
                     )
 
                 await async_db.update_key_status(
-                    result.api_key, status, balance, model_tier, rpm, is_high
+                    result.api_key, status, "", model_tier, rpm, False
                 )
                 processed_count += 1
 
-                # UI 反馈
-                source_short = (getattr(result, "source_url", "") or "").rsplit('/', 1)[-1]
+                source_url = getattr(result, "source_url", "") or ""
+                if status in (KeyStatus.VALID, KeyStatus.QUOTA_EXCEEDED):
+                    try:
+                        from notify_integration import disclose_finding
+                        await disclose_finding(
+                            async_db.db_path, result.platform, result.api_key, source_url,
+                        )
+                    except Exception as notify_error:
+                        logger.error(f"[Validator-{worker_id}] 处置通知失败: {notify_error}")
+
+                # UI 反馈。余额和高价值不进入界面。
+                source_short = source_url.rsplit('/', 1)[-1]
                 if status == KeyStatus.VALID:
                     _safe_dashboard(dashboard, "increment_stat", "valid_keys")
                     _safe_dashboard(dashboard, "add_valid_key",
                                     platform=result.platform,
                                     masked_key=masked,
-                                    balance=balance or model_tier,
+                                    balance="",
                                     source=source_short,
-                                    is_high_value=is_high)
+                                    is_high_value=False)
                     _safe_dashboard(dashboard, "add_log",
                                     f"✓ 有效! {model_tier or platform.upper()} {masked}",
-                                    "HIGH" if is_high else "VALID")
+                                    "VALID")
                 elif status == KeyStatus.QUOTA_EXCEEDED:
                     _safe_dashboard(dashboard, "increment_stat", "quota_exceeded")
                     _safe_dashboard(dashboard, "add_log", f"⚠ 配额耗尽 {masked}", "WARN")

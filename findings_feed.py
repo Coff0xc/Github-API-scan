@@ -80,6 +80,16 @@ def build_document(db_path: str) -> dict:
     }
 
 
+def disclosure_notice(platform: str, preview: str, location: str) -> str:
+    """给资产所有方的通知。只有平台、脱敏预览和位置。"""
+    return "\n".join((
+        f"平台: {platform or '未知'}",
+        f"预览: {preview or ''}",
+        f"位置: {location or '未知'}",
+        "请吊销该密钥。这条通知没有完整密钥，也没有余额。",
+    ))
+
+
 def write_findings(db_path: str, out_path: str) -> str:
     document = build_document(db_path)
     with open(out_path, "w", encoding="utf-8") as handle:
@@ -87,7 +97,8 @@ def write_findings(db_path: str, out_path: str) -> str:
         handle.write("\n")
     return (
         f"已写出 {len(document['findings'])} 条发现: {out_path}\n"
-        "  文件不含明文 Key。把处置状态写回时用 --apply-dispositions。"
+        "  文件不含明文 Key。通知发出后会标为 notified。"
+        "确认吊销后执行 --set-disposition <指纹> rotated。"
     )
 
 

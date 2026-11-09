@@ -723,22 +723,11 @@ class FileChannel(NotificationChannel):
         if not self.enabled:
             return False
 
-        severity = key_info.severity
+        from findings_feed import disclosure_notice
 
-        content = f"""
-{'='*70}
-[{key_info.found_time.strftime('%Y-%m-%d %H:%M:%S')}] {severity.emoji} {severity.value.upper()} - {key_info.platform.upper()}
-{'='*70}
-Platform:   {key_info.platform}
-Key:        {key_info.api_key}
-Base URL:   {key_info.base_url or 'N/A'}
-Model:      {key_info.model_tier or 'N/A'}
-Balance:    {key_info.balance or 'N/A'}
-RPM:        {key_info.rpm or 'N/A'}
-Source:     {key_info.source_url or 'N/A'}
-High Value: {key_info.is_high_value}
-{'='*70}
-"""
+        content = disclosure_notice(
+            key_info.platform, key_info.masked_key, key_info.source_url,
+        ) + "\n"
 
         try:
             with open(self.output_path, "a", encoding="utf-8") as f:
@@ -1045,9 +1034,23 @@ class NotifierV2:
         return results
 
     async def _send_to_channel(self, channel: NotificationChannel, key_info: KeyInfo) -> bool:
-        """发送到单个渠道"""
+        """只发送平台、脱敏预览和位置。渠道拿不到完整密钥和余额。"""
+        from findings_feed import disclosure_notice
+
+        preview = key_info.masked_key
+        text = disclosure_notice(key_info.platform, preview, key_info.source_url)
+        if key_info.api_key and key_info.api_key in text:
+            text = text.replace(key_info.api_key, preview)
         try:
-            return await channel.send(key_info, "")
+            if isinstance(channel, SoundChannel):
+                safe = KeyInfo(
+                    platform=key_info.platform,
+                    api_key=preview,
+                    source_url=key_info.source_url,
+                    found_time=key_info.found_time,
+                )
+                return await channel.send(safe, "")
+            return await channel.send_report("泄露处置", text)
         except Exception as e:
             logger.error(f"{channel.name} 发送失败: {e}")
             return False
