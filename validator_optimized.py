@@ -318,11 +318,9 @@ class OptimizedAsyncValidator:
                 self._log(f"缓存命中: {mask_key(api_key)}", "DEBUG")
                 return ValidationResult(
                     KeyStatus(cached_result['status']),
-                    cached_result.get('balance', ''),
-                    cached_result.get('model_tier', 'GPT-3.5'),
+                    cached_result.get('info') or cached_result.get('balance', ''),
+                    cached_result.get('model_tier') or "",
                     cached_result.get('rpm', 0),
-                    cached_result.get('latency', 0.0),
-                    cached_result.get('is_high_value', False)
                 )
             self._stats['cache_misses'] += 1
 
@@ -388,21 +386,17 @@ class OptimizedAsyncValidator:
                         if rpm_tier:
                             info = f"{info} [{rpm_tier}]"
 
-                        is_high = model_tier == "GPT-4" or rpm >= RPM_ENTERPRISE_THRESHOLD
+                        result = ValidationResult(KeyStatus.VALID, info, model_tier, rpm)
 
-                        result = ValidationResult(KeyStatus.VALID, info, model_tier, rpm, 0.0, is_high)
-
-                        # v2.2: 存储到缓存
+                        # 缓存只留状态、说明、模型档位和 RPM。不记高价值。
                         if self._cache_manager:
                             await self._cache_manager.set_validation_result(
                                 api_key, base_url,
                                 {
                                     'status': result.status.value,
-                                    'balance': result.balance,
+                                    'info': result.info,
                                     'model_tier': result.model_tier,
                                     'rpm': result.rpm,
-                                    'latency': result.latency,
-                                    'is_high_value': result.is_high_value
                                 }
                             )
 
@@ -598,12 +592,10 @@ async def optimized_validator_worker(
                 if platform in ("openai", "relay"):
                     vr = await validator.validate_openai(result.api_key, result.base_url or "")
                     status = vr.status
-                    balance = vr.balance
                     model_tier = vr.model_tier
                     rpm = vr.rpm
-                    is_high = vr.is_high_value
                 else:
-                    status, balance, model_tier, rpm, is_high = await validate_key_async(
+                    status, _balance, model_tier, rpm, _is_high = await validate_key_async(
                         result.platform,
                         result.api_key,
                         result.base_url,

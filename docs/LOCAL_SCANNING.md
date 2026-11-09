@@ -52,9 +52,7 @@ The short hash is the first 10 characters of the blob or commit. Pairing uses th
 
 ## Threat report
 
-`--report` writes Markdown for an authorized assessment. It counts rows in the database, then lists credentials whose status is `valid` or `quota_exceeded`. Both are live. The key column is masked unless you passed `--reveal-report`.
-
-The table also has columns for model tier, balance, RPM, and a high-value mark, because the generator still prints them. The current validation path stores model tier and RPM when the check returns them, and it writes an empty balance and `is_high_value = false`. On a fresh scan those two columns are blank. Do not treat the report as a value ranking. The hand-off that stays in sync with the product is `findings.json`.
+`--report` writes Markdown for an authorized assessment. It counts rows in the database, then lists credentials whose status is `valid` or `quota_exceeded`. Both are live. Rows are ordered by the time they were found, newest first. Each row has the platform, status, masked preview, location, and time. Model tier and RPM appear only when that check returned them, and they do not change the order. `--reveal-report` replaces the preview with the full key.
 
 The closing section of the report is the remediation list: revoke the key, remove it from Git history with something like `git filter-repo`, check the provider console for use, and put a pre-commit hook on the repository.
 

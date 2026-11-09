@@ -4,8 +4,9 @@
 
 把验证结果整理成渗透测试交付物（Markdown）：
 - 总览统计（按状态/平台）
-- 威胁点清单：**存活凭据**（valid）与有效但配额耗尽（quota_exceeded）
-- 每个威胁点附处置建议（轮换密钥）
+- 威胁点清单：valid 与 quota_exceeded
+- 每行是平台、状态、脱敏预览、位置和发现时间
+- 模型档位和 RPM 仅在这次检查拿到时附上，不参与排序
 
 默认脱敏输出，--reveal-report 时才输出完整 Key（报告本身属敏感交付物，
 注意分发范围）。
@@ -29,6 +30,12 @@ def _mask(key: str) -> str:
     if len(plain) <= 10:
         return plain[:3] + "***"
     return f"{plain[:6]}...{plain[-4:]}"
+
+
+def _live_sort_key(key) -> tuple:
+    """新发现在前。模型档位、RPM、余额和高价值不参与排序。"""
+    stamp = key.found_time.timestamp() if key.found_time else 0
+    return (-stamp, key.platform or "", key.source_url or "")
 
 
 def _cell(value: str) -> str:
@@ -87,26 +94,23 @@ def generate_report(db_path: str, out_path: str, reveal: bool = False) -> str:
             lines.append(f"| {_cell(platform)} | {count} |")
         lines.append("")
 
-    # 威胁点明细
+    # 威胁点明细。按发现时间新到旧，不用余额或高价值排序。
     lines.append("## 2. 威胁点（存活凭据清单）")
     lines.append("")
     if not live_keys:
         lines.append("无存活凭据。所有入库候选均已失效或无法验证。")
     else:
-        # 高价值优先，余额次之
-        live_keys.sort(key=lambda k: (not k.is_high_value, -k.balance_usd))
+        live_keys.sort(key=_live_sort_key)
 
-        lines.append("| # | 平台 | Key | 模型档位 | 余额 | RPM | 高价值 | 泄露位置 | 发现时间 |")
-        lines.append("|---|---|---|---|---|---|---|---|---|")
+        lines.append("| # | 平台 | 状态 | 预览 | 模型档位 | RPM | 位置 | 发现时间 |")
+        lines.append("|---|---|---|---|---|---|---|---|")
         for i, k in enumerate(live_keys, 1):
             key_display = k.api_key if reveal else _mask(k.api_key)
-            balance = f"${k.balance_usd:.2f}" if k.balance_usd else (_cell(k.balance) or "-")
             found = k.found_time.strftime("%Y-%m-%d %H:%M") if k.found_time else "-"
             lines.append(
-                f"| {i} | {_cell(k.platform)} | `{_cell(key_display)}` "
-                f"| {_cell(k.model_tier) or '-'} | {balance} "
-                f"| {k.rpm or '-'} | {'⭐' if k.is_high_value else '-'} "
-                f"| {_cell(k.source_url) or '-'} | {found} |"
+                f"| {i} | {_cell(k.platform)} | {_cell(k.status) or '-'} "
+                f"| `{_cell(key_display)}` | {_cell(k.model_tier) or '-'} "
+                f"| {k.rpm or '-'} | {_cell(k.source_url) or '-'} | {found} |"
             )
         lines.append("")
 
