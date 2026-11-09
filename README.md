@@ -398,6 +398,7 @@ config.yaml             thresholds, concurrency, blocklists
 - [docs/AGENT_PIPELINE.md](docs/AGENT_PIPELINE.md)
 - [docs/DOCKER_GUIDE.md](docs/DOCKER_GUIDE.md)
 - [docs/NOTIFY_README.md](docs/NOTIFY_README.md)
+- [docs/WEB_DASHBOARD_GUIDE.md](docs/WEB_DASHBOARD_GUIDE.md)
 - [docs/AI_ASSISTED_ANALYSIS.md](docs/AI_ASSISTED_ANALYSIS.md)
 
 ## License

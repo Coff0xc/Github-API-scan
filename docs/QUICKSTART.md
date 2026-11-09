@@ -1,8 +1,10 @@
-# 快速开始
+# Quick start
 
-唯一入口是 `main_v2.2.py`。远程搜索只在你指定的组织或仓库里进行。
+One entry point: `main_v2.2.py`. A remote search runs only inside the organization or repository you name.
 
-## 安装
+## Install
+
+Python 3.10 or newer.
 
 ```bash
 git clone https://github.com/Coff0xc/Github-API-scan.git
@@ -10,50 +12,56 @@ cd Github-API-scan
 pip install -r requirements.txt
 ```
 
-Python 3.10+。Windows 上不要安装 `uvloop`。
+On Windows, skip `uvloop` if a dependency mentions it.
 
-## 配置
+## Configure
 
-令牌不要提交进仓库。任选一种：
+Do not commit tokens. Either export them:
 
 ```bash
 export GITHUB_TOKENS="ghp_your_token_here"
-export DB_ENCRYPTION_KEY="一段足够长的随机密码"
+export DB_ENCRYPTION_KEY="a-long-random-passphrase"
+export DASHBOARD_TOKEN="another-random-passphrase"
 ```
 
-或复制 `config_local.py.example` 为 `config_local.py`，只在本机保存。
+or copy `config_local.py.example` to `config_local.py` and set `GITHUB_TOKENS` there. That file is gitignored.
 
-GitHub 令牌需要能搜索你要审计的那个组织或仓库。经典令牌至少勾选对应仓库的读取权限。
+The GitHub token needs read access to the organization or repository you are auditing. `DB_ENCRYPTION_KEY` encrypts keys at rest. Without it, a scan refuses to write unless you pass `--allow-plaintext-db`.
 
-## 第一次扫描
+## First scan
+
+Confirm [AUTHORIZED_USE.md](../AUTHORIZED_USE.md) with `--authorized`, or set `SCANNER_AUTHORIZED=1` in CI.
 
 ```bash
 python main_v2.2.py --authorized --target-org your-org
-```
-
-`--target-repo` 必须是 `owner/name`。没有这两个参数之一，GitHub 搜索不会发出。
-
-未设置 `DB_ENCRYPTION_KEY` 时，扫描拒绝写入，除非加上 `--allow-plaintext-db`。
-
-本地目录：
-
-```bash
+python main_v2.2.py --authorized --target-repo owner/name
 python main_v2.2.py --authorized --scan-local D:\repos\target
 ```
 
-## 查看和导出
+`--target-repo` is `owner/name`. Without one of those two flags, GitHub search does not start. When the scan finishes it writes `findings.json`: fingerprint, platform, masked preview, location, and disposition. No full key, no balance.
+
+Open the same rows in a browser:
+
+```bash
+python web_dashboard.py
+```
+
+The page is `http://127.0.0.1:5000`.
+
+## Look at what you already have
 
 ```bash
 python main_v2.2.py --stats
-python main_v2.2.py --export results.txt --status valid
 python main_v2.2.py --findings-json findings.json
+python main_v2.2.py --export results.txt --status valid
 ```
 
-文本和 CSV 默认脱敏。明文导出需要 `--reveal`。`findings.json` 给外部代理，里面没有明文密钥。说明见 [AGENT_PIPELINE.md](AGENT_PIPELINE.md)。
+Text and CSV are masked. A full key in an export requires `--reveal`. `findings.json` is for a person or an agent, and it never contains a raw key. See [AGENT_PIPELINE.md](AGENT_PIPELINE.md).
 
-## 相关文档
+## Read next
 
-- [AUTHORIZED_USE.md](../AUTHORIZED_USE.md)
+- [../README.md](../README.md)
+- [../AUTHORIZED_USE.md](../AUTHORIZED_USE.md)
 - [USAGE_GUIDE.md](USAGE_GUIDE.md)
 - [LOCAL_SCANNING.md](LOCAL_SCANNING.md)
-- [MIGRATION.md](MIGRATION.md)
+- [WEB_DASHBOARD_GUIDE.md](WEB_DASHBOARD_GUIDE.md)
