@@ -1,20 +1,19 @@
 # AI API Key Scanner
 
-Scan GitHub repositories for leaked AI API keys and validate them. Supports 50+ platforms including OpenAI, Claude, Gemini, and basically everything else you'd want to check.
+在你有权检查的 GitHub 组织或仓库里查找泄露的 API 密钥。远程搜索没有 `--target-org` 或 `--target-repo` 不会发出。交给外部代理的文件是脱敏记录，不是一套能直接使用的密钥。
 
 ![Python](https://img.shields.io/badge/python-3.10+-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
-![Version](https://img.shields.io/badge/version-3.0-orange.svg)
 
-**Latest update (July 2026)**: Added support for OpenRouter, AWS Bedrock, xAI Grok, and a bunch of other platforms that appeared this year.
+唯一入口是 `main_v2.2.py`。使用边界见 [AUTHORIZED_USE.md](AUTHORIZED_USE.md)。
 
 <img src="assets/screenshot.png" alt="Dashboard" width="800"/>
 
 ## What does this do?
 
-Searches GitHub for exposed API keys, then validates them to see if they actually work. Simple as that.
+在限定的组织或仓库里搜索已提交的密钥材料，滤掉明显的测试值和低熵字符串，再写入本地 SQLite。终端界面会跳过已经查过的记录。
 
-The tool has a terminal UI and skips keys it has already checked. The old "430x" figure was not an end-to-end measurement. `benchmark.py` only times database inserts.
+`benchmark.py` 只比较合成数据的 SQLite 插入。它不搜索 GitHub，也不访问模型厂商。旧的「430 倍」不是端到端扫描结果。
 
 ## Supported platforms
 
@@ -26,7 +25,7 @@ The tool has a terminal UI and skips keys it has already checked. The old "430x"
 - xAI (Grok)
 - Meta (Llama API)
 
-**API aggregators** (these are gold mines):
+**API aggregators:**
 - OpenRouter
 - Portkey
 - LiteLLM
@@ -46,12 +45,6 @@ The tool has a terminal UI and skips keys it has already checked. The old "430x"
 - Plus 20+ more platforms
 
 Full list: OpenAI, Anthropic, Google Gemini, Azure, xAI, Meta Llama, OpenRouter, Portkey, LiteLLM, Cloudflare AI, AWS Bedrock, Vertex AI, Alibaba Cloud, Volcano Engine, Tencent Hunyuan, Baidu Qianfan, DeepSeek, Moonshot, Zhipu, Yi AI, StepFun, iFlytek, HuggingFace, Groq, Cohere, Mistral, Together AI, Replicate, Perplexity, Fireworks, AI21, Writer, Forefront, Modal, RunPod, Baseten, and generic services like AWS, GitHub tokens, Stripe, etc.
-
-## Performance
-
-Tested on 1000 keys:
-
-Async I/O, caching, connection pooling, and batch writes are what the v2.2 path actually changes. Do not treat the old 0.24-second table as a full scan benchmark.
 
 ## Quick start
 
@@ -160,16 +153,12 @@ python main_v2.2.py --authorized --report threat.md --reveal-report
 
 ## How it works
 
-1. **Scan**: Searches GitHub using optimized queries (93 different search patterns)
-2. **Filter**: Removes test keys, fake keys, and garbage using entropy analysis
-3. **Deduplicate**: Checks cache and database to avoid re-validating
-4. **Validate**: Tests keys against actual API endpoints (100+ concurrent requests)
-5. **Store**: Saves results to SQLite database
+1. **Scan**: GitHub 搜索只在 `--target-org` 或 `--target-repo` 之内发出
+2. **Filter**: 用熵和黑名单去掉测试值、占位符和明显垃圾
+3. **Store**: 写入 SQLite。设置 `DB_ENCRYPTION_KEY` 后，密钥列是 Fernet 密文
+4. **Disclose**: `--findings-json` 和面板上的发现列表只含指纹、位置和脱敏预览
 
-The tool uses a 3-layer cache:
-- L1: Validation results (30-50% hit rate)
-- L2: Domain health (skips dead domains)
-- L3: Key fingerprints (duplicate detection)
+扫描进程里的验证请求打到密钥声明的服务。对没有授权的资产做这件事，不在 [AUTHORIZED_USE.md](AUTHORIZED_USE.md) 允许的范围内。
 
 ## Security hardening (v3.0.1)
 
@@ -264,7 +253,7 @@ If you find leaked keys:
 2. Don't use them
 3. Don't share them
 
-The authors are not responsible for misuse. You're an adult, act like one.
+作者不对误用负责。范围和授权对不上时，不要运行扫描。
 
 ## Security recommendations
 
@@ -296,25 +285,22 @@ pip install pre-commit gitleaks
 pre-commit install
 ```
 
-## Performance
-
-`benchmark.py` compares synchronous and asynchronous SQLite inserts on synthetic rows. It does not search GitHub or call provider APIs. Run it locally if you need a number for the database path. The 108x / 320x / 430x table that used to be here was not reproducible from that script and has been removed.
-
 ## Documentation
 
 **根目录**
 - [AUTHORIZED_USE.md](AUTHORIZED_USE.md) - **使用边界声明（必读）**
 
 **docs/**
-- [QUICKSTART.md](docs/QUICKSTART.md) - Get started in 5 minutes
+- [QUICKSTART.md](docs/QUICKSTART.md) - 从安装到第一次限定范围的扫描
 - [USAGE_GUIDE.md](docs/USAGE_GUIDE.md) - 完整使用说明
-- [AI_ASSISTED_ANALYSIS.md](docs/AI_ASSISTED_ANALYSIS.md) - AI 辅助假阳性过滤接入（Ollama / OpenAI 兼容 API）
+- [LOCAL_SCANNING.md](docs/LOCAL_SCANNING.md) - 本地仓库审计和威胁报告
+- [AGENT_PIPELINE.md](docs/AGENT_PIPELINE.md) - 给 Grok Bot / Muse 的脱敏发现
+- [AI_ASSISTED_ANALYSIS.md](docs/AI_ASSISTED_ANALYSIS.md) - 可选的假阳性过滤
 - [DOCKER_GUIDE.md](docs/DOCKER_GUIDE.md) - Docker 部署
 - [WEB_DASHBOARD_GUIDE.md](docs/WEB_DASHBOARD_GUIDE.md) - Web 面板
 - [NOTIFY_README.md](docs/NOTIFY_README.md) - 通知渠道配置
-- [OPTIMIZATION.md](docs/OPTIMIZATION.md) - Technical details
-- [MIGRATION.md](docs/MIGRATION.md) - Upgrade guide
-- [CHANGELOG_V3.0.md](docs/CHANGELOG_V3.0.md) - What's new
+- [MIGRATION.md](docs/MIGRATION.md) - 旧入口已经删除
+- [SECURITY.md](SECURITY.md) - 报告本仓库缺陷时不要贴密钥
 
 ## Contributing
 
@@ -328,7 +314,8 @@ git clone https://github.com/Coff0xc/Github-API-scan.git
 git checkout -b feature/new-platform
 
 # Make changes and test
-python test_v2.2.py
+python test_boundary_fixes.py
+python test_findings_feed.py
 
 # Submit PR
 git push origin feature/new-platform
@@ -340,19 +327,16 @@ git push origin feature/new-platform
 A: Yes, if you have authorization. No, if you don't.
 
 **Q: Why do I need a GitHub token?**  
-A: GitHub rate limits unauthenticated requests to 10/min. With a token you get 30/min per token.
+A: 搜索接口对未认证请求限额很低。令牌放在 `GITHUB_TOKENS` 或 `config_local.py`，不要写进仓库。
 
-**Q: Can I scan private repos?**  
-A: No. This tool only scans public repositories.
+**Q: Can I scan any public repo?**  
+A: 不能。远程搜索必须指定组织或 `owner/name`。范围应是你拥有或已获授权的资产。
 
-**Q: What if a key is rate limited?**  
-A: The tool marks it as "quota_exceeded" instead of "invalid". Still a valid key, just hit the limit.
+**Q: What leaves the machine?**  
+A: `--findings-json` 和 `GET /api/findings` 只有指纹、位置、脱敏预览和处置状态。明文导出需要 `--reveal`。
 
 **Q: Why are some platforms missing?**  
-A: Either they don't have a public API, or I haven't added them yet. PRs welcome.
-
-**Q: Can this get me in trouble?**  
-A: Only if you use it irresponsibly. Don't be stupid.
+A: 没有单独识别规则的服务会落到通用匹配。缺规则可以提 PR，不要附上真实密钥。
 
 ## License
 

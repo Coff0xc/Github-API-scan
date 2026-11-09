@@ -56,8 +56,8 @@ export FEISHU_WEBHOOK="https://open.feishu.cn/open-apis/bot/v2/hook/xxx"
 export DINGTALK_WEBHOOK="https://oapi.dingtalk.com/robot/send?access_token=xxx"
 export DINGTALK_SECRET="SECxxx"  # 可选，加签密钥
 
-# 运行扫描器
-python main.py
+# 运行扫描器。远程搜索必须带组织或仓库。
+python main_v2.2.py --authorized --target-org your-org
 ```
 
 ### 方式二: 配置文件
