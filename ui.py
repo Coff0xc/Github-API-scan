@@ -4,7 +4,7 @@ UI 模块 - Rich TUI 仪表盘
 使用 rich 库构建实时刷新的终端界面：
 - Header: 状态栏
 - Stats Panel: 统计数据
-- Live Table: 有效 Key 列表
+- Live Table: 发现记录（平台、脱敏预览、状态、位置）
 - Log Panel: 实时日志
 - Footer: 进度条
 """
@@ -52,21 +52,17 @@ class DashboardStats:
 
 @dataclass
 class ValidKeyRecord:
-    """有效 Key 记录"""
+    """终端里的一条发现。balance 和 is_high_value 仍接受旧调用，但不展示。"""
     platform: str
     masked_key: str
-    balance: str
     source: str
     found_time: str
-    is_high_value: bool = False  # 高价值标记
-    
+    status: str = "valid"
+    balance: str = ""
+    is_high_value: bool = False
+
     @property
     def platform_color(self) -> str:
-        """根据平台和价值返回颜色"""
-        # 高价值 Key 使用金色粗体
-        if self.is_high_value:
-            return "bold gold1"
-        
         colors = {
             "openai": "green",
             "azure": "blue",
@@ -75,15 +71,6 @@ class ValidKeyRecord:
             "relay": "yellow",
         }
         return colors.get(self.platform.lower(), "white")
-    
-    @property
-    def balance_style(self) -> str:
-        """余额显示样式"""
-        if self.is_high_value:
-            return "bold green"
-        if "$" in self.balance:
-            return "bold cyan"
-        return "green"
 
 
 # ============================================================================
@@ -100,7 +87,7 @@ class Dashboard:
     ├─────────────────────────────────────────────┤
     │    Stats Panel    │      Log Panel          │
     ├─────────────────────────────────────────────┤
-    │              Valid Keys Table                │
+    │              Findings                         │
     ├─────────────────────────────────────────────┤
     │                   Footer                     │
     └─────────────────────────────────────────────┘
@@ -164,7 +151,7 @@ class Dashboard:
         
         return Panel(
             header_text,
-            title="🔍 GitHub Secret Scanner Pro",
+            title="AI API Key Scanner",
             title_align="center",
             border_style="cyan",
             box=box.ROUNDED,
@@ -193,7 +180,7 @@ class Dashboard:
             Text(f"{self.stats.invalid_keys:,}", style="red")
         )
         stats_table.add_row(
-            Text("💰 配额耗尽", style="white"),
+            Text("⚠ 配额耗尽", style="white"),
             Text(f"{self.stats.quota_exceeded:,}", style="yellow")
         )
         stats_table.add_row(
@@ -242,59 +229,42 @@ class Dashboard:
         )
     
     def _render_table(self) -> Panel:
-        """渲染有效 Key 表格（高价值特殊高亮）"""
+        """最近的发现：平台、脱敏预览、状态、位置。"""
         table = Table(
             show_header=True,
             header_style="bold white",
             box=box.SIMPLE,
             expand=True,
         )
-        
-        table.add_column("平台", style="bold", width=10)
-        table.add_column("Key", width=20)
-        table.add_column("状态/余额", width=15)
-        table.add_column("来源", width=30)
-        table.add_column("时间", width=10)
-        
-        # 显示最近的有效 Key（最多 10 条）
-        # 高价值 Key 使用金色/绿色粗体高亮
+
+        table.add_column("平台", style="bold", width=12)
+        table.add_column("预览", width=22)
+        table.add_column("状态", width=16)
+        table.add_column("位置", width=36)
+
         for record in self.valid_keys[-10:]:
-            # 高价值 Key 特殊标记
-            if record.is_high_value:
-                platform_text = Text(f"⭐ {record.platform.upper()}", style="bold gold1")
-                key_text = Text(record.masked_key, style="bold gold1")
-                balance_text = Text(record.balance, style=record.balance_style)
-            else:
-                platform_text = Text(record.platform.upper(), style=record.platform_color)
-                key_text = Text(record.masked_key, style=record.platform_color)
-                balance_text = Text(record.balance, style=record.balance_style)
-            
+            location = record.source
+            if len(location) > 36:
+                location = location[:33] + "..."
             table.add_row(
-                platform_text,
-                key_text,
-                balance_text,
-                record.source[:28] + "..." if len(record.source) > 30 else record.source,
-                record.found_time,
+                Text(record.platform, style=record.platform_color),
+                Text(record.masked_key),
+                Text(record.status, style="green"),
+                Text(location),
             )
-        
+
         if not self.valid_keys:
             table.add_row(
                 Text("--", style="dim"),
-                Text("等待有效 Key...", style="dim"),
+                Text("等待发现", style="dim"),
                 Text("--", style="dim"),
                 Text("--", style="dim"),
-                Text("--", style="dim")
             )
-        
-        # 根据是否有高价值 Key 设置边框颜色
-        high_value_count = sum(1 for r in self.valid_keys if r.is_high_value)
-        border_style = "gold1" if high_value_count > 0 else "green"
-        title_prefix = f"💎 {high_value_count}个高价值 | " if high_value_count > 0 else ""
-        
+
         return Panel(
             table,
-            title=f"{title_prefix}🏆 有效 Key 列表 (The Treasure)",
-            border_style=border_style,
+            title="发现记录",
+            border_style="green",
             box=box.ROUNDED,
         )
     
@@ -343,7 +313,7 @@ class Dashboard:
             "SCAN": "cyan",
             "FOUND": "green",
             "VALID": "bold green",
-            "HIGH": "bold gold1",      # 高价值 Key
+            "HIGH": "bold green",
             "SKIP": "yellow",
             "WARN": "yellow",
             "ERROR": "red",
@@ -357,42 +327,28 @@ class Dashboard:
             self.logs.append(formatted)
     
     def add_valid_key(
-        self, 
-        platform: str, 
-        masked_key: str, 
-        balance: str, 
-        source: str,
-        is_high_value: bool = False
+        self,
+        platform: str,
+        masked_key: str,
+        balance: str = "",
+        source: str = "",
+        is_high_value: bool = False,
+        status: str = "valid",
     ):
-        """
-        添加有效 Key 记录
-        
-        Args:
-            platform: 平台名称
-            masked_key: 隐藏的 Key
-            balance: 余额/状态信息
-            source: 来源
-            is_high_value: 是否为高价值 Key (GPT-4/有余额/Enterprise RPM)
-        """
+        """记下一条存活发现。balance 和 is_high_value 被忽略，留给旧调用方。"""
         record = ValidKeyRecord(
             platform=platform,
             masked_key=masked_key,
-            balance=balance,
             source=source,
             found_time=datetime.now().strftime("%H:%M:%S"),
-            is_high_value=is_high_value,
+            status=status or "valid",
+            balance=balance,
+            is_high_value=False,
         )
-        
+
         with self._lock:
             self.valid_keys.append(record)
             self.stats.valid_keys += 1
-            
-            # 高价值 Key 特殊日志
-            if is_high_value:
-                self.logs.append(
-                    f"[dim]{datetime.now().strftime('%H:%M:%S')}[/] [bold gold1][💎 HIGH][/] "
-                    f"发现高价值 Key: {platform.upper()} {masked_key}"
-                )
     
     def update_stats(self, **kwargs):
         """更新统计数据"""
