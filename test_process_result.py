@@ -18,7 +18,6 @@ def test_process_result_does_not_score_or_store_value():
             db = Database(os.path.join(root, "keys.db"))
             validator = AsyncValidator(db)
             validator.probe_gpt4 = _fail("probe_gpt4")
-            validator.probe_billing = _fail("probe_billing")
             validator.probe_quota_by_request = _fail("probe_quota")
 
             async def fake_validate(_result):
@@ -40,12 +39,13 @@ def test_process_result_does_not_score_or_store_value():
             assert stored[0].rpm == 8000
             with sqlite3.connect(db.db_path) as conn:
                 row = conn.execute(
-                    "SELECT balance, balance_usd FROM leaked_keys"
+                    "SELECT status, model_tier, rpm FROM leaked_keys"
                 ).fetchone()
                 columns = {info[1] for info in conn.execute("PRAGMA table_info(leaked_keys)")}
-            assert row[0] in ("", None)
-            assert row[1] == 0
-            assert "is_high_value" not in columns
+            assert row == ("valid", "GPT-4", 8000)
+            for retired in ("is_high_value", "balance", "balance_usd", "value_score"):
+                assert retired not in columns
+            assert not hasattr(AsyncValidator, "probe_billing")
 
     asyncio.run(run())
 
@@ -64,6 +64,7 @@ def test_platform_checks_do_not_flag_high_value():
     source = inspect.getsource(validator.AsyncValidator)
     assert "is_high_value=True" not in source
     assert "is_high_value=balance" not in source
+    assert "def probe_billing" not in source
 
 
 if __name__ == "__main__":

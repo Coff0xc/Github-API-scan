@@ -57,7 +57,6 @@ def export_keys(db_path: str, output_file: str, status_filter: str = None, revea
             f.write(f"状态: {key.status}\n")
             f.write(f"Key: {shown}\n")
             f.write(f"URL: {key.base_url}\n")
-            f.write(f"信息: {key.balance}\n")
             f.write(f"来源: {key.source_url}\n")
             f.write("-" * 40 + "\n\n")
 
@@ -77,7 +76,7 @@ def export_keys_csv(db_path: str, output_file: str, status_filter: str = None, r
         return
 
     fieldnames = [
-        "id", "platform", "status", "api_key", "base_url", "balance",
+        "id", "platform", "status", "api_key", "base_url",
         "source_url", "model_tier", "rpm", "found_time",
     ]
 
@@ -91,7 +90,6 @@ def export_keys_csv(db_path: str, output_file: str, status_filter: str = None, r
                 "status": key.status,
                 "api_key": key.api_key if reveal else mask_key(key.api_key),
                 "base_url": key.base_url,
-                "balance": key.balance,
                 "source_url": key.source_url,
                 "model_tier": key.model_tier,
                 "rpm": key.rpm,
@@ -124,7 +122,6 @@ def export_keys_encrypted(db_path: str, output_file: str, status_filter: str = N
         "api_key": k.api_key,
         "base_url": k.base_url,
         "status": k.status,
-        "balance": k.balance,
         "source_url": k.source_url,
     } for k in keys]
     encrypted_data = cipher.encrypt(json.dumps(data, ensure_ascii=False).encode("utf-8"))

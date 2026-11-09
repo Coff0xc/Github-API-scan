@@ -138,7 +138,6 @@ class Database:
                         key_hash TEXT,
                         base_url TEXT NOT NULL,
                         status TEXT DEFAULT 'pending',
-                        balance TEXT DEFAULT '',
                         source_url TEXT DEFAULT '',
                         model_tier TEXT DEFAULT '',
                         rpm INTEGER DEFAULT 0,
@@ -146,7 +145,6 @@ class Database:
                         verified_time DATETIME,
 
                         -- 深度验证字段（P4）
-                        balance_usd REAL DEFAULT 0.0,
                         used_quota_usd REAL DEFAULT 0.0,
                         total_quota_usd REAL DEFAULT 0.0,
                         tpm INTEGER DEFAULT 0,
@@ -157,8 +155,7 @@ class Database:
                         organization TEXT DEFAULT '',
                         account_name TEXT DEFAULT '',
                         expiration_date TEXT DEFAULT '',
-                        key_type TEXT DEFAULT '',
-                        value_score INTEGER DEFAULT 0
+                        key_type TEXT DEFAULT ''
                     )
                 """)
 
@@ -191,13 +188,8 @@ class Database:
                     cursor.execute("ALTER TABLE leaked_keys ADD COLUMN rpm INTEGER DEFAULT 0")
                 except sqlite3.OperationalError:
                     pass
-                columns = {row[1] for row in cursor.execute("PRAGMA table_info(leaked_keys)")}
-                if "is_high_value" in columns:
-                    cursor.execute("ALTER TABLE leaked_keys DROP COLUMN is_high_value")
-
-                # 深度验证字段迁移
+                # 深度验证字段迁移。余额和价值分不再入库。
                 deep_validation_fields = [
-                    ("balance_usd", "REAL DEFAULT 0.0"),
                     ("used_quota_usd", "REAL DEFAULT 0.0"),
                     ("total_quota_usd", "REAL DEFAULT 0.0"),
                     ("tpm", "INTEGER DEFAULT 0"),
@@ -209,7 +201,6 @@ class Database:
                     ("account_name", "TEXT DEFAULT ''"),
                     ("expiration_date", "TEXT DEFAULT ''"),
                     ("key_type", "TEXT DEFAULT ''"),
-                    ("value_score", "INTEGER DEFAULT 0"),
                 ]
 
                 for field_name, field_type in deep_validation_fields:
@@ -229,7 +220,12 @@ class Database:
                     "UPDATE leaked_keys SET disposition = 'open' "
                     "WHERE disposition IS NULL OR disposition = ''"
                 )
-                
+
+                columns = {row[1] for row in cursor.execute("PRAGMA table_info(leaked_keys)")}
+                for retired in ("is_high_value", "balance", "balance_usd", "value_score"):
+                    if retired in columns:
+                        cursor.execute(f"ALTER TABLE leaked_keys DROP COLUMN {retired}")
+
                 # 创建索引
                 cursor.execute("""
                     CREATE INDEX IF NOT EXISTS idx_platform ON leaked_keys(platform)
@@ -371,23 +367,21 @@ class Database:
                 try:
                     cursor.execute("""
                         INSERT INTO leaked_keys
-                        (platform, api_key, key_hash, base_url, status, balance, source_url, model_tier, rpm, found_time,
-                         balance_usd, used_quota_usd, total_quota_usd, tpm, rpd,
+                        (platform, api_key, key_hash, base_url, status, source_url, model_tier, rpm, found_time,
+                         used_quota_usd, total_quota_usd, tpm, rpd,
                          has_gpt4, has_gpt5, has_claude_opus, organization, account_name,
-                         expiration_date, key_type, value_score)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         expiration_date, key_type)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
                         key.platform,
                         vault.encrypt(key.api_key),
                         vault.hash_key(key.api_key),
                         key.base_url,
                         key.status,
-                        key.balance,
                         key.source_url,
                         key.model_tier,
                         key.rpm,
                         key.found_time.isoformat() if key.found_time else datetime.now().isoformat(),
-                        key.balance_usd,
                         key.used_quota_usd,
                         key.total_quota_usd,
                         key.tpm,
@@ -399,7 +393,6 @@ class Database:
                         key.account_name,
                         key.expiration_date,
                         key.key_type,
-                        key.value_score
                     ))
                     conn.commit()
                     return True
@@ -429,46 +422,21 @@ class Database:
         key_type: str = "",
         value_score: int = 0
     ) -> bool:
-        """
-        更新 Key 的验证状态（支持深度验证字段）
-
-        Args:
-            api_key: API Key
-            status: 新状态
-            balance: 余额/附加信息（向后兼容）
-            model_tier: 模型阶梯
-            rpm: RPM 限制
-            is_high_value: 已忽略，列已删除
-            balance_usd: 余额（美元）
-            used_quota_usd: 已用额度
-            total_quota_usd: 总额度
-            tpm: Tokens per minute
-            rpd: Requests per day
-            has_gpt4, has_gpt5, has_claude_opus: 模型访问权限
-            organization: 组织名称
-            account_name: 账户名称
-            expiration_date: 到期日期
-            key_type: 密钥类型
-            value_score: 价值评分
-        """
+        """回写状态、模型档位和 RPM。其余参数仍可传入，不再写入。"""
+        del balance, is_high_value, balance_usd, value_score
+        del used_quota_usd, total_quota_usd, tpm, rpd
+        del has_gpt4, has_gpt5, has_claude_opus
+        del organization, account_name, expiration_date, key_type
         with self._lock:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
                     UPDATE leaked_keys
-                    SET status = ?, balance = ?, model_tier = ?, rpm = ?, verified_time = ?,
-                        balance_usd = ?, used_quota_usd = ?, total_quota_usd = ?, tpm = ?, rpd = ?,
-                        has_gpt4 = ?, has_gpt5 = ?, has_claude_opus = ?,
-                        organization = ?, account_name = ?, expiration_date = ?, key_type = ?, value_score = ?
+                    SET status = ?, model_tier = ?, rpm = ?, verified_time = ?
                     WHERE key_hash = ?
                 """, (
-                    status.value, balance, model_tier, rpm,
+                    status.value, model_tier, rpm,
                     datetime.now().isoformat(),
-                    balance_usd, used_quota_usd, total_quota_usd, tpm, rpd,
-                    1 if has_gpt4 else 0,
-                    1 if has_gpt5 else 0,
-                    1 if has_claude_opus else 0,
-                    organization, account_name, expiration_date, key_type, value_score,
                     vault.hash_key(api_key)
                 ))
                 conn.commit()
