@@ -1,115 +1,111 @@
-# AI API Key Scanner
-
-An authorized audit finds an AI API key, keeps the address that belongs next to it, checks that pair only on a target you are allowed to test, and leaves behind a masked record the owner can act on.
-
-The entry point is `main_v2.2.py`. A scan of a GitHub organization or repository will not start unless you name that organization or that `owner/name` repository. A scan of a folder on disk uses `--scan-local`.
-
-![Python 3.10+](https://img.shields.io/badge/python-3.10+-3776AB?logo=python&logoColor=white)
-![License MIT](https://img.shields.io/badge/license-MIT-111827)
-![Findings schema](https://img.shields.io/badge/findings-v1-1d4ed8)
+<h1 align="center">AI API Key Scanner</h1>
 
 <p align="center">
-  <img src="assets/screenshot.png" alt="Findings dashboard: fingerprints, platforms, masked previews, locations, and disposition" width="920">
+Someone committed an API key. This tool finds it, keeps the website address written next to it, checks that pair only on a project you are allowed to test, and gives you a short record you can show the owner.
+<br><br>
+The key itself stays on the machine that ran the scan.
 </p>
 
 <p align="center">
-  <sub>Local dashboard, English UI. The rows are example data for a fictional <code>acme-labs</code> organization. Previews are masked. The page shows no live key, balance, or value score. The header switches between EN and 中文.</sub>
+  <img src="https://img.shields.io/badge/python-3.10+-3776AB?logo=python&logoColor=white" alt="Python 3.10+">
+  <img src="https://img.shields.io/badge/license-MIT-111827" alt="MIT license">
+  <img src="https://img.shields.io/badge/one%20command-main__v2.2.py-1d4ed8" alt="Entry point main_v2.2.py">
 </p>
 
-If you own the code and someone else runs the scanner, you only need the dashboard at `http://127.0.0.1:5000` or the file `findings.json`. Each row is one place a credential showed up: the service, a short masked preview, and the file. Tell the owner with those three facts. After the key is revoked, mark the row rotated. If the row was a sample or a placeholder, mark it a false positive.
+<p align="center">
+  <img src="assets/screenshot.png" alt="Dashboard of example findings: platform, masked preview, file location, and what has been done about each row" width="920">
+</p>
 
-## Contents
+<p align="center">
+  <sub>The page you get on this computer, in English. The company name <code>acme-labs</code> is made up. The previews are shortened on purpose. Nothing on this page is a usable key.</sub>
+</p>
 
-- [How a run is shaped](#how-a-run-is-shaped)
-- [One key, followed through](#one-key-followed-through)
-- [What a finding contains](#what-a-finding-contains)
-- [Disposition](#disposition)
-- [Install](#install)
-- [Secrets and configuration](#secrets-and-configuration)
-- [Run a scan](#run-a-scan)
-- [Local history](#local-history)
-- [Dashboard](#dashboard)
-- [Commands](#commands)
-- [Notifications](#notifications)
-- [Threat report and agents](#threat-report-and-agents)
-- [Platforms](#platforms)
-- [Knobs in config.yaml](#knobs-in-configyaml)
-- [Boundary](#boundary)
-- [Where to read the code](#where-to-read-the-code)
-- [Further reading](#further-reading)
-- [License](#license)
+| If you own the code | If you run the scan |
+| --- | --- |
+| Open `http://127.0.0.1:5000` after someone else has scanned. | Run `python main_v2.2.py` and name the organization or the folder. |
+| Each row is one place a key showed up: the service, a shortened preview, and the file. | When it finishes, the same rows are in `findings.json`. |
+| Tell the owner those three things. Do not paste the real key into chat. | The real key stays in the local database, scrambled if you set a passphrase. |
+| After the key is revoked, mark the row **Rotated**. If it was only an example, mark it **False alarm**. | The header of the page switches between **EN** and **中文**. |
 
-## How a run is shaped
+## A scan, from the top
 
-Search, pairing, and validation are the product. The findings file is how the result leaves the machine. Gitleaks and TruffleHog are good at spotting a secret-shaped string. They do not know that the same `sk-` string is an official OpenAI key, an Azure resource key, or a key for a relay whose host is three lines above it. This scanner's job is to keep that pair intact, then check it only when the asset is in scope.
+You point it at one place. It does not go looking across all of GitHub.
 
 ```mermaid
-flowchart LR
-  subgraph scope [Where it is allowed to look]
-    Org["--target-org or --target-repo"]
-    Disk["--scan-local"]
-  end
+flowchart TB
+  Start["One organization, one owner/name repository,<br/>or a folder on disk"]
+  Read["Read the file, including old commits<br/>if you are scanning a folder"]
+  Pair["Keep the key together with<br/>the address written beside it"]
+  Drop["Drop obvious fakes<br/>such as sk-test and example files"]
+  Ask["Ask that address whether the key still works"]
+  Box[("Database on this computer")]
+  File["findings.json<br/>shortened preview only"]
+  Page["Dashboard in the browser"]
+  Note["Optional chat notice<br/>service, preview, file"]
 
-  Extract[Extract candidates]
-  Pair[Pair key with base_url]
-  Filter[Drop samples and low entropy]
-  Validate[Check that host]
-  DB[(SQLite)]
-  Out[findings.json]
-  Panel[Dashboard]
-  Notice[Disclosure notice]
-
-  Org --> Extract
-  Disk --> Extract
-  Extract --> Pair --> Filter --> Validate --> DB
-  DB --> Out
-  DB --> Panel
-  Validate --> Notice
-  Notice -->|mark notified| DB
+  Start --> Read --> Pair --> Drop --> Ask --> Box
+  Box --> File
+  Box --> Page
+  Ask --> Note
+  Note -->|someone was told| Box
 ```
 
-Remote search appends `org:` or `repo:` to every GitHub code-search query. With neither flag, no search request goes out. `--target-repo` must be `owner/name`, and it wins when both flags are present. Gist, Pastebin, GitLab Snippets, Searchcode, and GitHub Events cannot be pinned to one organization, so they stay off unless you also pass `--allow-public-sources`.
+A remote search will not even start until you pass `--target-org your-org` or `--target-repo owner/name`. The repository form has to be `owner/name`, and it wins if you pass both. Paste sites, Gist, and similar public dumps stay off. They cannot be limited to one organization. Turn them on only when the written permission covers them, with `--allow-public-sources`.
 
-Pairing reads the surrounding text. A named assignment such as `OPENAI_BASE_URL=` or `base_url=` is preferred. A known relay hostname outranks a random URL in the same window. Azure is recognized from the endpoint in that window, not from the key string alone, because a 32-hex string is too common to trust by itself. An empty `base_url` means the vendor's own API.
+## One file, drawn out
 
-Before anything is stored, entropy and a path blocklist drop obvious samples: `sk-test`, documentation placeholders, `node_modules`, fixtures, and files the blocklist names. The default entropy floor is 3.8. When one match sits entirely inside a longer match, only the longer one is kept, so the tail of an OpenAI project key is not also reported as a second platform.
-
-Validation calls the paired host. `pending` is not yet checked. `valid` answered as a live credential. `invalid` did not. `quota_exceeded` answered and then hit a limit, so an authorized assessment still treats it as live. Private, link-local, reserved, and multicast addresses are refused. A hostname is refused when any DNS answer falls in those ranges. `localhost`, `127.0.0.1`, and `::1` remain available for a relay you are running on the same machine.
-
-The database is SQLite, default path `leaked_keys.db`. With `DB_ENCRYPTION_KEY` set, the `api_key` column is Fernet ciphertext prefixed `enc:v1:`. The key is derived with PBKDF2-HMAC-SHA256, salt `github-api-scan/key-vault/v1`, 200,000 rounds. Dedup uses `key_hash`, the SHA-256 of the key, which is also the fingerprint in the findings file. Changing the passphrase makes old ciphertext undecryptable. A scan refuses to write until the passphrase is set, unless you pass `--allow-plaintext-db`.
-
-Balance and `is_high_value` are not written on this path. The hand-off does not rank keys by how much they are worth.
-
-## One key, followed through
-
-Suppose an authorized scan of `acme-labs` hits `app/settings.py` at commit `4c1e9a2`:
+Picture `app/settings.py` inside an organization you are allowed to audit:
 
 ```text
 OPENAI_BASE_URL=https://api.internal-relay.invalid/v1
 sk-proj-Qw9Rt8Yu7Ip6Lk5Jh4Gf3Ds2Az1Xc0Vb
 ```
 
-The extractor keeps both lines. The platform is `openai`. The base URL is the relay, not `api.openai.com`. The preview a person sees is `sk-pro...c0Vb`: the first six characters, an ellipsis, and the last four. The fingerprint is the SHA-256 of the full key, 64 hex characters. The location is the GitHub blob URL, or `local://git@<blob>:<path>` when the file exists only in Git history.
+The two lines belong together. The key is not checked against OpenAI's own site, because the file says to use a relay. A relay is just another server that speaks the same API.
 
-That row starts as `open`. If Discord, Slack, Telegram, Feishu, DingTalk, ServerChan, or Bark is configured, a live result can send a notice with the platform, the preview, and the location, plus a line that says the notice has no full key and no balance. When a channel accepts it, the row becomes `notified`. The tool cannot see the vendor console, so `rotated` stays a human mark after the key is actually revoked.
+```mermaid
+sequenceDiagram
+  participant File as settings.py
+  participant Tool as Scanner
+  participant Relay as The address in the file
+  participant Page as Dashboard
 
-A second scan of the same repository does not validate that key again. The blob hash is in `scanned_blobs`, and the key hash is already in `leaked_keys`.
+  File->>Tool: key, and the address on the line above
+  Tool->>Tool: this does not look like a sample
+  Tool->>Relay: does this key work here?
+  Relay-->>Tool: yes
+  Tool->>Page: openai · sk-pro...c0Vb · settings.py
+```
 
-## What a finding contains
+What a person sees is `sk-pro...c0Vb`: the first six characters, three dots, and the last four. The full key is not on the page.
 
-`findings.json` uses schema `findings.v1`. `GET /api/findings` returns the same document and ignores any reveal parameter. Both are gitignored, together with `dispositions.json`. Do not commit them.
+The row also gets an id, called the fingerprint. It is the SHA-256 of the key, 64 hex characters. You use that id when you mark the row rotated. It is not the key, and it cannot be turned back into the key.
 
-| Field | Meaning |
-| --- | --- |
-| `fingerprint` | SHA-256 of the key, 64 hex characters. This is the id for disposition changes. |
-| `platform` | Service name, such as `openai`, `anthropic`, `azure`, or `openrouter`. A non-official host is stored as `relay`. |
-| `preview` | First 6 characters, `...`, last 4. |
-| `repo` | `owner/name`. A Gist is `gist:user`. Empty when the URL cannot be parsed. |
-| `path` | Path inside the repo. Empty when the URL has none. |
-| `commit` | Commit or branch taken from the URL. A branch name lands here when the link uses a branch. |
-| `location` | Original URL, or a `local://` path. |
-| `disposition` | `open`, `notified`, `rotated`, or `false_positive`. |
-| `found_time` | When the row was stored. |
+If the same text matches a short pattern and a longer one, only the longer one is kept. Otherwise the tail of an OpenAI key would show up again as a second, unrelated service.
+
+## What leaves the machine, and what stays
+
+```mermaid
+flowchart LR
+  Full["The full key"] --> DB[("leaked_keys.db<br/>on this computer")]
+  DB --> Scramble["Scrambled when DB_ENCRYPTION_KEY is set"]
+  DB --> People["Dashboard, findings.json,<br/>chat notice, threat report"]
+  People --> Short["Service name, shortened preview,<br/>file location"]
+```
+
+`findings.json` and the page `GET /api/findings` are the same list. Asking either of them to reveal the key does nothing. Both files, and `dispositions.json`, are gitignored. Do not commit them.
+
+| What you call it | Field in the file | What it actually is |
+| --- | --- | --- |
+| Id | `fingerprint` | SHA-256 of the key. Use this to update the row. |
+| Service | `platform` | `openai`, `anthropic`, `azure`, `openrouter`, and so on. A private relay is stored as `relay`. |
+| Preview | `preview` | First 6 characters, `...`, last 4. |
+| Repository | `repo` | `owner/name`. A Gist is `gist:user`. |
+| File | `path` | Path inside that repository. |
+| Commit or branch | `commit` | Taken from the link. A branch name lands here when the link uses a branch. |
+| Link | `location` | The original URL, or a `local://` path. |
+| What you did about it | `disposition` | `open`, `notified`, `rotated`, or `false_positive`. |
+| When | `found_time` | When the row was stored. |
 
 ```json
 {
@@ -131,34 +127,44 @@ A second scan of the same repository does not validate that key again. The blob 
 }
 ```
 
-The fingerprint and preview above are illustrations. They are not a credential.
+That id and that preview are examples. They are not a key.
 
-## Disposition
+The check itself has four answers:
+
+| Answer | Meaning |
+| --- | --- |
+| `pending` | Not checked yet. |
+| `valid` | The address accepted the key. |
+| `invalid` | The address rejected it. |
+| `quota_exceeded` | The key is real, and the account is out of credit or out of requests. Still treat it as live. |
+
+The scanner does not call private-network addresses, link-local addresses, or reserved and multicast addresses. If a hostname's DNS answers include any of those, the call is refused. `localhost`, `127.0.0.1`, and `::1` still work, so you can point a test at a relay running on the same machine.
+
+## What happens to a row
 
 ```mermaid
 stateDiagram-v2
-  [*] --> open
-  open --> notified: a configured channel accepts the notice
-  open --> rotated: a person confirms revocation
-  open --> false_positive: a person marks a sample
-  notified --> rotated: a person confirms revocation
-  notified --> false_positive: a person marks a sample
+  [*] --> Open
+  Open --> Told: a chat channel accepted the notice
+  Open --> Rotated: a person revoked the key
+  Open --> FalseAlarm: a person says it was a sample
+  Told --> Rotated: a person revoked the key
+  Told --> FalseAlarm: a person says it was a sample
 ```
 
-| Status | Who sets it | What it means |
+| On the page | In the file | Who sets it |
 | --- | --- | --- |
-| `open` | The scan, by default | Stored, and nobody has handled it. |
-| `notified` | The notifier, after a channel accepts | The owner was told the platform, preview, and location. |
-| `rotated` | A person | The key was revoked or replaced. |
-| `false_positive` | A person | A sample, a placeholder, or not a secret. |
-
-From the shell, one row at a time:
+| Open | `open` | The scan, when the row is new. |
+| Notified | `notified` | The tool, after Discord, Slack, or another channel accepts the message. |
+| Rotated | `rotated` | A person, after the key is actually revoked. The tool cannot see the vendor's website. |
+| False alarm | `false_positive` | A person, when the text was a sample or not a secret. |
 
 ```bash
-python main_v2.2.py --set-disposition <64-hex-fingerprint> rotated
+python main_v2.2.py --set-disposition <64-hex-id> rotated
+python main_v2.2.py --apply-dispositions dispositions.json
 ```
 
-An agent, or you, can batch the same update. Extra fields are ignored. The fingerprint still has to be 64 hex characters.
+A batch file looks like this. Extra fields are ignored. The id still has to be 64 hex characters. A bare list, or an object whose list is named `findings`, is also accepted.
 
 ```json
 {
@@ -168,13 +174,25 @@ An agent, or you, can batch the same update. Extra fields are ignored. The finge
 }
 ```
 
-```bash
-python main_v2.2.py --apply-dispositions dispositions.json
+## Old commits still count
+
+Deleting a file today does not delete the commit that added it. A folder scan reads Git history, so that older copy can still show up.
+
+```mermaid
+flowchart TB
+  Add["Commit: settings.py is added"] --> Bytes["Those exact file bytes"]
+  Copy["Same text copied to a second path"] --> Bytes
+  Delete["Later commit: the file is deleted"] --> Bytes
+  Bytes --> Once["Read once"]
+  Once --> Row["The finding still names that file"]
+  Next["The next scan"] --> Skip["Skips bytes it has already read"]
 ```
 
-A bare array, or an object whose array is named `findings`, is accepted too.
+The tool asks Git for every file object, then reads each unique one once. Two paths with the same bytes are one read. The next run skips objects it has already recorded. Commit messages are read on their own, so a key pasted into a message is not mixed into whichever file happened to be nearby.
 
-## Install
+`--no-git-history` stays on the files sitting in the folder now. Files larger than 500 KB, and files that look binary, are skipped. Change the size in `config.yaml` if you need to.
+
+## Install and the three secrets
 
 Python 3.10 or newer.
 
@@ -184,11 +202,15 @@ cd Github-API-scan
 pip install -r requirements.txt
 ```
 
-On Windows, skip `uvloop` if a dependency mentions it. The scanner runs without it.
+On Windows, if a package tries to install `uvloop`, skip it. The scanner does not need it.
 
-## Secrets and configuration
+Three values matter. None of them belong in git. `config_local.py` is already ignored.
 
-Keep tokens out of git. `config_local.py` is gitignored. Environment variables work the same way.
+| Name | Plain job |
+| --- | --- |
+| `GITHUB_TOKENS` | Lets the scan search the organization you named. A classic token needs read access to those repositories. Several tokens, separated by commas, share the rate limit. |
+| `DB_ENCRYPTION_KEY` | Passphrase for the database. Without it, a scan refuses to save. `--allow-plaintext-db` is the explicit override. |
+| `DASHBOARD_TOKEN` | Password for changing a row in the browser, and for export. Reading the masked list does not need it. |
 
 bash:
 
@@ -206,17 +228,17 @@ $env:DB_ENCRYPTION_KEY = "a-long-random-passphrase"
 $env:DASHBOARD_TOKEN = "another-random-passphrase"
 ```
 
-Or copy `config_local.py.example` to `config_local.py` and set `GITHUB_TOKENS` there. Several tokens share the search budget. Separate them with commas in the environment variable, or use a list in `config_local.py`. The token needs permission to search the organization or repository you are auditing.
+Or copy `config_local.py.example` to `config_local.py` and set `GITHUB_TOKENS` there.
 
-Later sources override earlier ones: built-in defaults, then `config.yaml`, then `config_local.py`, then flags.
+How the database lock works, if you need the exact construction: the column is Fernet ciphertext starting with `enc:v1:`. The key is PBKDF2-HMAC-SHA256 of your passphrase, salt `github-api-scan/key-vault/v1`, 200,000 rounds. Losing the passphrase means old rows cannot be read. The fingerprint does not change when you turn encryption on, because it is a hash of the key, not of the ciphertext.
 
-`DB_ENCRYPTION_KEY` encrypts keys at rest. `DASHBOARD_TOKEN` is required to change a disposition, to reveal a key through `/api/keys`, or to export. Reading `GET /api/findings` does not send it. Treat both values as passwords.
+Settings are layered. Later wins: built-in defaults, then `config.yaml`, then `config_local.py`, then command-line flags.
 
-`--authorized` confirms you have read [AUTHORIZED_USE.md](AUTHORIZED_USE.md). In CI, set `SCANNER_AUTHORIZED=1`. In an interactive terminal, with neither of those, the program asks you to type `y`. A non-interactive run without them aborts.
+Before a scan, the program wants a yes. `--authorized` is that yes, after you have read [AUTHORIZED_USE.md](AUTHORIZED_USE.md). In CI, set `SCANNER_AUTHORIZED=1`. In a terminal, with neither, it asks you to type `y`. A script with neither stops.
 
-Docker Compose does not choose an organization and does not set `SCANNER_AUTHORIZED` for you. The scanner service's command is `python main_v2.2.py`, so a container that starts with the file as written will stop at the scope check. Override the command with `--authorized` and a `--target-org` or `--target-repo`, and set `DB_ENCRYPTION_KEY`. The dashboard container publishes `127.0.0.1:5000` on the host. Inside the container the process listens on `0.0.0.0`, which is safe only because the published port is loopback. Opening that port on a LAN means you need a strong `DASHBOARD_TOKEN`. See [docs/DOCKER_GUIDE.md](docs/DOCKER_GUIDE.md).
+Docker Compose does not pick an organization for you, and it does not set that yes. The scanner service's command is `python main_v2.2.py`, so a container started from the file as written will stop at the scope check. Override the command with `--authorized` and a target, and set `DB_ENCRYPTION_KEY`. The dashboard container publishes `127.0.0.1:5000` on the host. Inside the container it listens on `0.0.0.0`, which is acceptable only because the published port is still this machine. Opening that port on a LAN means you need a strong dashboard token. See [docs/DOCKER_GUIDE.md](docs/DOCKER_GUIDE.md).
 
-## Run a scan
+## Run it
 
 ```bash
 python main_v2.2.py --authorized --target-org your-org
@@ -224,171 +246,172 @@ python main_v2.2.py --authorized --target-repo owner/name
 python main_v2.2.py --authorized --scan-local D:\repos\target
 ```
 
-Each of those writes `findings.json` in the working directory when it finishes. Pick another path with `--findings-json reports/findings.json`. Passing `--findings-json` alone, with no scan target, exports the database you already have and exits. `--stats`, export, and `--report` also do not need a search scope.
+Each of those writes `findings.json` in the working directory. Another path: `--findings-json reports/findings.json`. If you pass only that flag and no target, it exports the database you already have and exits.
 
-`--scan-local` walks the working tree and the Git history, so a key removed in a later commit can still appear. `--no-git-history` stays on the files that are there now.
+While the scan runs, the terminal title is **AI API Key Scanner**. The table under the counters is **发现记录**: service, shortened preview, status, and place. It is the same idea as the screenshot, in the terminal. There is no balance column.
 
-Set `AI_FILTER_ENABLED=1` when you want a model pass to drop likely false positives. It stays off otherwise. Details are in [docs/AI_ASSISTED_ANALYSIS.md](docs/AI_ASSISTED_ANALYSIS.md).
+Set `AI_FILTER_ENABLED=1` if you want a model to drop rows that look like examples. It is off unless you turn it on. See [docs/AI_ASSISTED_ANALYSIS.md](docs/AI_ASSISTED_ANALYSIS.md).
 
-## Local history
-
-A secret often survives in a commit that no longer exists on the branch tip. The local scanner lists every blob with `git rev-list --all --objects` and reads each distinct hash once through `git cat-file --batch`. The same bytes copied into two paths are one object. The hash is stored in `scanned_blobs`, and the next run skips it. The worktree walk skips a tracked file whose blob was already read.
-
-Commit messages are scanned on their own, so a key pasted into a message is not mixed into the diff of whatever file happened to be open. Files over the size cap, and blobs that look binary, are skipped and remembered so they are not reread. The cap in `config.yaml` is 500 KB.
-
-## Dashboard
+## The page in the screenshot
 
 ```bash
 python web_dashboard.py
 ```
 
-Open `http://127.0.0.1:5000`. `DASHBOARD_HOST` defaults to `127.0.0.1`. Any other bind address puts the panel on the network.
+Open `http://127.0.0.1:5000`. It binds to this machine only, unless you set `DASHBOARD_HOST`. Any other address puts the page on the network.
 
-The home page is the findings list in the screenshot. Counts for all rows, open, notified, and rotated sit above a platform chart and a disposition chart. Filters cover disposition, platform, and a search across fingerprint, preview, and location. The fingerprint column shows a short form. The full 64 hex characters are on the row tooltip, and that full value is what you submit.
+The counts are all rows, open, notified, and rotated. Under them, one chart is services and one is status. You can filter, and you can search the id, the preview, or the place. The id in the table is shortened. Hover a row for all 64 characters. That full value is what you send when you change the status.
 
-The language switch is **EN / 中文**. English is the default unless the browser language is Chinese, or you open `?lang=en` or `?lang=zh`. The choice is stored in this browser.
+The token box keeps `DASHBOARD_TOKEN` in the browser tab and sends it only as the header `X-API-Token`. It is not accepted in the URL, so it does not land in access logs. The reply is `ok`, the id, and the new status. It does not send back a key, even if the request also contained one.
 
-The token field stores `DASHBOARD_TOKEN` in `sessionStorage` and sends it only as the `X-API-Token` header. It is not accepted as a query parameter, so it does not land in access logs. The disposition request body is the fingerprint and the new status. The response is `ok`, the fingerprint, and the disposition. It does not echo a key, even if the client also sent one.
-
-| Call | Auth | What comes back |
+| Request | Needs the token? | What you get |
 | --- | --- | --- |
-| `GET /` | none | The findings page. |
-| `GET /api/findings` | none | `findings.v1`. Reveal is ignored. |
-| `GET /api/stats` | none | Counts, including disposition totals and top platforms. |
-| `POST /api/findings/disposition` | `X-API-Token` | Updates one row by fingerprint. |
-| `GET /api/keys` | token only if `reveal=1` | Masked rows, unless reveal is authorized. |
-| `GET /api/export` | token, and the token must be configured | Fernet body by default. `mask=1` returns masked JSON. |
-| `POST /api/stats/update` | token | Scanner progress pushed into the page. |
+| `GET /` | no | The page in the screenshot. |
+| `GET /api/findings` | no | The masked list. A reveal flag is ignored. |
+| `GET /api/stats` | no | Counts. |
+| `POST /api/findings/disposition` | yes | Updates one row by its id. |
+| `GET /api/keys` | only if you ask to reveal | Masked rows, unless reveal is allowed. |
+| `GET /api/export` | yes, and the token must be configured | An encrypted file. `mask=1` returns masked JSON. |
+| `POST /api/stats/update` | yes | Progress the scanner pushes into the page. |
 
-Missing header: HTTP 401. Token not configured on the server: HTTP 403, and export is disabled. A wrong token is HTTP 401. After 10 failures from the same connecting IP inside 60 seconds, that IP gets HTTP 429. The limiter uses the socket address, not `X-Forwarded-For`. Comparison is constant-time.
+No header: HTTP 401. Token not configured: HTTP 403, and export is off. A wrong token is HTTP 401. After 10 failures from the same address within 60 seconds, that address gets HTTP 429. The limit uses the connection's own address, not `X-Forwarded-For`.
 
-There is no export button on the home page. `GET /api/export` still exists for an authorized assessment. The body is Fernet, derived with PBKDF2-HMAC-SHA256 from `EXPORT_KEY` or, if that is unset, from `DASHBOARD_TOKEN`, salt `github-api-scan/export/v1`, 200,000 rounds. `DB_PATH` selects the database file for both the scanner and the panel.
+There is no export button on the page. Export exists for a review you are allowed to run. The file is Fernet, from `EXPORT_KEY` or, if that is unset, from `DASHBOARD_TOKEN`. Salt `github-api-scan/export/v1`, 200,000 rounds. `DB_PATH` picks the database file for both the scanner and the page.
 
-## Commands
+The page loads its charts from a CDN. If the charts stay empty and the table is fine, the CDN was blocked.
 
-Day to day:
+## Notices, the report, and helpers
+
+If you configure a channel, a live key or a quota hit can send four lines: the service, the shortened preview, the place, and a reminder that the message has no full key and no balance. When the channel accepts it, the row becomes notified. With no channel, nothing is sent and the row stays open. The scanner does not write a desktop file of raw keys.
+
+```text
+Discord          DISCORD_WEBHOOK
+Slack            SLACK_WEBHOOK
+Telegram         TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID
+Feishu           FEISHU_WEBHOOK
+DingTalk         DINGTALK_WEBHOOK, optional DINGTALK_SECRET
+ServerChan       SERVERCHAN_KEY
+Bark             BARK_DEVICE_KEY
+```
+
+Copy `notify_config.example.yaml` when you want a file, or set `NOTIFY_CONFIG` to another path. Quiet hours and a rate limit still exist in that file. A normal scan notice is not treated as an emergency, so quiet hours can hold it. See [docs/NOTIFY_README.md](docs/NOTIFY_README.md).
+
+A Markdown report for the same review:
+
+```bash
+python main_v2.2.py --authorized --report threat.md
+```
+
+It lists keys that came back valid or out of quota, newest first. Each line has the service, the status, the shortened preview, the place, and the time. Model name and requests-per-minute show up only when the check actually returned them. They do not change the order. `--reveal-report` prints full keys into that file. Keep it out of git.
+
+Grok Bot and Muse can read `findings.json` or `GET /api/findings`, group rows by repository, and write statuses back after a person decides. They do not start a scan. They do not receive the raw key, the database passphrase, or the dashboard token. See [docs/AGENT_PIPELINE.md](docs/AGENT_PIPELINE.md).
+
+## Everyday commands
 
 ```bash
 python main_v2.2.py --stats
 python main_v2.2.py --findings-json findings.json
-python main_v2.2.py --set-disposition <64-hex-fingerprint> notified
-python main_v2.2.py --set-disposition <64-hex-fingerprint> rotated
-python main_v2.2.py --apply-dispositions dispositions.json
-
 python main_v2.2.py --export results.txt --status valid
 python main_v2.2.py --export-csv results.csv --status valid
 python main_v2.2.py --export-encrypted secure.bin
-
 python main_v2.2.py --authorized --report threat.md
 ```
 
-Text and CSV are masked. `--reveal` writes full keys into an export. Use it inside an authorized assessment, and do not commit the file.
+Text and CSV are shortened. `--reveal` writes full keys into an export. Do not commit that file.
 
-| Flag | Effect |
+<details>
+<summary>Every flag</summary>
+
+| Flag | What it does |
 | --- | --- |
-| `--authorized` | Confirm the use boundary for this process. |
-| `--target-org ORG` | Limit GitHub search to one organization. |
-| `--target-repo OWNER/REPO` | Limit GitHub search to one repository. Wins over `--target-org`. |
-| `--scan-local DIR` | Scan a local directory and its Git history. |
-| `--no-git-history` | With `--scan-local`, skip older commits. |
-| `--findings-json FILE` | Write the masked findings document. |
-| `--set-disposition FINGERPRINT STATUS` | Set one row to `open`, `notified`, `rotated`, or `false_positive`. |
-| `--apply-dispositions FILE` | Apply a JSON list of fingerprint updates. |
+| `--authorized` | Confirm you have read the use rules for this run. |
+| `--target-org ORG` | Search one GitHub organization. |
+| `--target-repo OWNER/REPO` | Search one repository. Wins over `--target-org`. |
+| `--scan-local DIR` | Scan a folder and its Git history. |
+| `--no-git-history` | With `--scan-local`, ignore older commits. |
+| `--findings-json FILE` | Write the masked list. |
+| `--set-disposition ID STATUS` | Set one row to `open`, `notified`, `rotated`, or `false_positive`. |
+| `--apply-dispositions FILE` | Apply a list of those updates. |
 | `--stats` | Print database counts. |
-| `--export FILE` | Masked text export. `--status valid` or `quota_exceeded` filters it. |
-| `--export-csv FILE` | Masked CSV export. |
-| `--export-encrypted FILE` | Fernet export. The key file is written beside it. |
-| `--decrypt FILE` | Decrypt a file from `--export-encrypted`. |
+| `--export FILE` | Masked text. `--status valid` or `quota_exceeded` filters it. |
+| `--export-csv FILE` | Masked CSV. |
+| `--export-encrypted FILE` | Encrypted export. The key file is written beside it. |
+| `--decrypt FILE` | Decrypt that export. |
 | `--key-file KEY` | Key file for `--decrypt`. |
 | `--reveal` | Put full keys in a text or CSV export. |
-| `--report FILE` | Write a Markdown threat report. |
-| `--reveal-report` | Include full keys in that report. |
+| `--report FILE` | Write the Markdown report. |
+| `--reveal-report` | Put full keys in that report. |
 | `--db FILE` | Database path. Default `leaked_keys.db`. |
-| `--proxy URL` | HTTP proxy for outbound calls. |
-| `--allow-plaintext-db` | Allow a scan to store keys without `DB_ENCRYPTION_KEY`. |
+| `--proxy URL` | HTTP proxy. |
+| `--allow-plaintext-db` | Allow saving without `DB_ENCRYPTION_KEY`. |
 | `--allow-public-sources` | Allow Gist, Pastebin, GitLab, Searchcode, and Events. |
-| `--gist` `--pastebin` `--gitlab` `--searchcode` `--realtime` | Turn on one of those sources. Still needs `--allow-public-sources`. |
+| `--gist` `--pastebin` `--gitlab` `--searchcode` `--realtime` | Turn one of those on. Still needs `--allow-public-sources`. |
 | `--all-sources` | Turn all of them on. Still needs `--allow-public-sources`. |
-| `--pastebin-key KEY` | Pastebin Pro API key, used only if Pastebin is enabled. |
-| `--no-cache` | Skip the validation cache for this run. |
+| `--pastebin-key KEY` | Pastebin Pro key, only if Pastebin is enabled. |
+| `--no-cache` | Do not reuse earlier check results for this run. |
 | `--no-monitor` | Skip the performance monitor. |
 | `--no-dynamic-queue` | Keep the queue size fixed. |
 
-## Notifications
+</details>
 
-A `valid` or `quota_exceeded` result can send the disclosure notice when a channel exists. With no channel, nothing is sent and the row stays `open`. The scanner does not create a desktop file of raw keys on its own.
+## Which services it recognizes
 
-Channels come from `notify_config.yaml`, or from the path in `NOTIFY_CONFIG`, and from these environment variables: `DISCORD_WEBHOOK`, `SLACK_WEBHOOK`, `TELEGRAM_BOT_TOKEN`, `FEISHU_WEBHOOK`, `DINGTALK_WEBHOOK`, `SERVERCHAN_KEY`, `BARK_DEVICE_KEY`. Copy `notify_config.example.yaml` when you want a file. See [docs/NOTIFY_README.md](docs/NOTIFY_README.md).
+The shapes it knows include OpenAI (`sk-proj-`, `sk-svcacct-`), Anthropic (`sk-ant-api03-` and the versions around it), Gemini (`AIza`), xAI (`xai-`), Groq (`gsk_`), Hugging Face (`hf_`), OpenRouter (`sk-or-v1-`), DeepSeek, Moonshot, Zhipu, and Portkey. Also the cloud prefixes used by Bedrock, Aliyun, Volcengine, Tencent Hunyuan, Baidu Qianfan, and Vertex.
 
-## Threat report and agents
+Azure is special. A 32-character hex string is too common to trust by itself, so Azure is accepted when the text around the key names an Azure OpenAI endpoint. Cloudflare, Together, and a few generic patterns are wide for the same reason. A wide match that is only the tail of a longer key is dropped.
 
-```bash
-python main_v2.2.py --authorized --report threat.md
-python main_v2.2.py --authorized --scan-local D:\repos\target --report threat.md
-```
+Also in the set: Meta Llama, LiteLLM, Mistral, Cohere, MiniMax, Baichuan, Replicate, Perplexity, Fireworks, plus a generic pass for GitHub tokens, AWS keys, and Stripe keys. The patterns live in `config.py`.
 
-The report is for an authorized assessment. It treats `valid` and `quota_exceeded` as live credentials and it is masked by default. `--reveal-report` prints full keys into the Markdown. Keep that file out of git.
+Knowing a shape means the scanner can look for it and knows where to check it. It does not mean you may check a key from a repository you were not allowed to open.
 
-Grok Bot and Muse read `findings.json` or `GET /api/findings`, group rows by repository, and write dispositions back after a person has decided. They do not start a scan. They do not receive raw keys, `DB_ENCRYPTION_KEY`, or `DASHBOARD_TOKEN`. The contract is in [docs/AGENT_PIPELINE.md](docs/AGENT_PIPELINE.md).
+## Numbers in config.yaml
 
-## Platforms
+These are the values shipped in the file. The code reads them. Do not put tokens in this file.
 
-Recognized shapes include OpenAI (`sk-proj-`, `sk-svcacct-`), Anthropic (`sk-ant-api03-` and neighboring versions), Gemini (`AIza`), xAI (`xai-`), Groq (`gsk_`), Hugging Face (`hf_`), OpenRouter (`sk-or-v1-`), DeepSeek, Moonshot, Zhipu, Portkey, and the cloud prefixes used by Bedrock, Aliyun, Volcengine, Tencent Hunyuan, Baidu Qianfan, and Vertex.
-
-Azure, Cloudflare AI, Together, and a few generic patterns are wide on purpose. Azure is accepted when the surrounding text names an Azure OpenAI endpoint. A wide match that is only the tail of a longer, prefixed key is dropped.
-
-Also in the set: Meta Llama, LiteLLM, Mistral, Cohere, MiniMax, Baichuan, Replicate, Perplexity, Fireworks, and a generic pass for GitHub tokens, AWS keys, and Stripe keys. The patterns themselves are in `config.py`.
-
-Naming a platform here means the scanner knows a shape and a place to check. It does not mean a key from an unapproved repository should be checked.
-
-## Knobs in config.yaml
-
-These are the values shipped in the file. Code reads them. Secrets do not belong in this file.
-
-| Section | Key | Shipped value | What it changes |
+| What you are tuning | Key | Shipped | Effect |
 | --- | --- | --- | --- |
-| `scanner` | `entropy_threshold` | `3.8` | Candidates below this Shannon entropy are treated as samples. |
-| `scanner` | `max_file_size_kb` | `500` | Larger files and blobs are skipped. |
-| `scanner` | `async_download_concurrency` | `60` | How many file bodies are fetched at once during a remote scan. |
-| `scanner` | `context_window` | `10` | Lines of context kept around a remote hit. |
-| `validator` | `max_concurrency` | `100` | In-flight validation requests. |
-| `validator` | `request_timeout` | `15` | Seconds before a check gives up. |
-| `validator` | `num_workers` | `2` | Validation worker threads. |
-| `database` | `batch_size` | `50` | Rows written per batch. |
-| `database` | `flush_interval` | `5.0` | Seconds between flushes. |
-| `circuit_breaker` | `failure_threshold` | `5` | Consecutive failures before a host is opened. |
-| `circuit_breaker` | `recovery_timeout` | `60` | Seconds before a half-open probe. |
-| `circuit_breaker` | `half_open_requests` | `3` | Probes allowed while half-open. |
+| How random a string must look before it counts | `scanner.entropy_threshold` | `3.8` | Duller strings are treated as samples. |
+| Largest file to read | `scanner.max_file_size_kb` | `500` | Bigger files are skipped. |
+| Files fetched at once | `scanner.async_download_concurrency` | `60` | Remote scan only. |
+| Lines kept around a hit | `scanner.context_window` | `10` | So the address beside the key is still visible. |
+| Checks in flight | `validator.max_concurrency` | `100` | |
+| Give up after | `validator.request_timeout` | `15` seconds | |
+| Worker threads | `validator.num_workers` | `2` | |
+| Rows per write | `database.batch_size` | `50` | |
+| Seconds between writes | `database.flush_interval` | `5.0` | |
+| Failures before a host is paused | `circuit_breaker.failure_threshold` | `5` | Stops hammering a dead server. |
+| Pause length | `circuit_breaker.recovery_timeout` | `60` seconds | |
+| Tries while waking a host back up | `circuit_breaker.half_open_requests` | `3` | |
 
-Official API hostnames are kept out of the circuit breaker so a burst of invalid keys does not black-hole the vendor. The domain blocklist in the same file drops localhost-style and example hosts from pairing. That list is separate from the SSRF check, which still allows a loopback relay you are debugging on purpose.
+Official API hostnames are not paused by that breaker, so a pile of bad keys does not block the vendor's real site. A separate list in the same file ignores example hosts when pairing an address. That list is not the private-network check. Loopback is still allowed on purpose.
 
-## Boundary
+## Where you may point it
 
-Allowed work is an audit of assets you own, an assessment with written permission from the owner, emergency handling of your own credentials where you can still revoke them, and detection research inside a lab you control.
+Your own projects. A project whose owner has given you written permission. Your own keys, in an emergency where you can still revoke them. A lab you control.
 
-The program will not search GitHub at large, will not turn on public paste sources by itself, and will not write a database until encryption is configured or you explicitly accept plaintext. Policy, including what to do after a find, is [AUTHORIZED_USE.md](AUTHORIZED_USE.md). How to report a bug in this project without pasting keys, database files, or tokens is [SECURITY.md](SECURITY.md).
+The program will not search the whole of GitHub, will not turn on public paste sites by itself, and will not save a database until encryption is set or you explicitly accept plaintext. What to do after a find is in [AUTHORIZED_USE.md](AUTHORIZED_USE.md). How to report a bug here without pasting keys, database files, or tokens is in [SECURITY.md](SECURITY.md).
 
-## Where to read the code
+## Where the code for each step lives
 
-```
-main_v2.2.py            only entry point
-use_boundary.py         startup confirmation and scope checks
-scanner.py              GitHub search, pairing, entropy, longer-match wins
-local_scanner.py        working tree and unique Git blobs
-validator_optimized.py  validation loop used by the entry point
-validator.py            circuit breaker, result types, request
-findings_feed.py        findings.v1 and the disclosure notice
-database.py             SQLite, scanned_blobs, disposition by fingerprint
-key_vault.py            Fernet at rest and the SHA-256 fingerprint
-threat_report.py        assessment report
-web_dashboard.py        local panel and the HTTP API
-notifier_v2.py          channel transports
+```text
+main_v2.2.py            the only command
+use_boundary.py         the yes-prompt and the scope check
+scanner.py              GitHub search, and pairing a key with its address
+local_scanner.py        a folder, and each unique Git file once
+validator_optimized.py  the check the command actually runs
+validator.py            shared types, the breaker, and the older check
+findings_feed.py        findings.json and the four-line notice
+database.py             SQLite, already-read files, status by id
+key_vault.py            scrambling the key, and the fingerprint
+threat_report.py        the Markdown report
+web_dashboard.py        the page in the screenshot
+notifier_v2.py          Discord, Slack, and the other channels
 notify_integration.py   when a notice is sent, and when a row becomes notified
-config.py               platform patterns and default base URLs
-config.yaml             thresholds, concurrency, blocklists
+config.py               service patterns and default addresses
+config.yaml             the numbers in the table above
 ```
 
-## Further reading
+## More to read
 
 - [AUTHORIZED_USE.md](AUTHORIZED_USE.md)
 - [SECURITY.md](SECURITY.md)
