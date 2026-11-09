@@ -19,18 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
-================================================================================
-                              ⚠️ DISCLAIMER ⚠️
-================================================================================
-This tool is intended for authorized security testing and educational purposes
-ONLY. Users are solely responsible for complying with all applicable laws and
-regulations. The authors assume no liability for misuse of this software.
-
-DO NOT use this tool to:
-- Scan systems without explicit authorization
-- Access or exploit credentials that do not belong to you
-- Violate any computer fraud, data protection, or privacy laws
-
-By using this software, you agree to use it responsibly and ethically.
-================================================================================

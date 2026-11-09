@@ -38,9 +38,10 @@ venv/
 env/
 ENV/
 
-# IDE
+# IDE and local agent notes
 .vscode/
 .idea/
+.claude/
 *.swp
 *.swo
 *~
