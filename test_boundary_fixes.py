@@ -94,15 +94,24 @@ def test_scoped_scan_still_requires_encryption():
     assert "DB_ENCRYPTION_KEY" in combined
 
 
-def test_legacy_entry_points_delegate():
+def test_single_entry_point():
     for script in ("main.py", "main_v2.1.py", "main_optimized.py"):
-        text = (ROOT / script).read_text(encoding="utf-8")
-        assert "runpy" in text
-        assert "class " not in text
-        result = _run_entry(script, "--help")
-        combined = result.stdout + result.stderr
-        assert "allow-public-sources" in combined
-        assert "deprecated" in combined
+        assert not (ROOT / script).exists()
+    result = _run_entry("main_v2.2.py", "--help")
+    combined = result.stdout + result.stderr
+    assert "allow-public-sources" in combined
+    assert "findings-json" in combined
+
+
+def test_private_targets_are_blocked():
+    from utils import host_is_safe_to_contact
+
+    assert host_is_safe_to_contact("127.0.0.1") is True
+    assert host_is_safe_to_contact("localhost") is True
+    assert host_is_safe_to_contact("10.1.2.3") is False
+    assert host_is_safe_to_contact("169.254.169.254") is False
+    assert host_is_safe_to_contact("8.8.8.8") is True
+    assert host_is_safe_to_contact("") is False
 
 
 if __name__ == "__main__":
@@ -112,5 +121,6 @@ if __name__ == "__main__":
     test_unscoped_remote_scan_stops()
     test_public_source_without_opt_in_stops()
     test_scoped_scan_still_requires_encryption()
-    test_legacy_entry_points_delegate()
+    test_single_entry_point()
+    test_private_targets_are_blocked()
     print("boundary fixes ok")
