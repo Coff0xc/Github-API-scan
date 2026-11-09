@@ -177,7 +177,6 @@ class DatabaseReader:
             'valid_keys': cursor.execute('SELECT COUNT(*) FROM leaked_keys WHERE status = "valid"').fetchone()[0],
             'invalid_keys': cursor.execute('SELECT COUNT(*) FROM leaked_keys WHERE status = "invalid"').fetchone()[0],
             'quota_exceeded': cursor.execute('SELECT COUNT(*) FROM leaked_keys WHERE status = "quota_exceeded"').fetchone()[0],
-            'high_value_keys': cursor.execute('SELECT COUNT(*) FROM leaked_keys WHERE is_high_value = 1').fetchone()[0],
             'dispositions': {
                 'open': 0,
                 'notified': 0,

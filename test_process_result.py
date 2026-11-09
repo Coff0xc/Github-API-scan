@@ -40,11 +40,12 @@ def test_process_result_does_not_score_or_store_value():
             assert stored[0].rpm == 8000
             with sqlite3.connect(db.db_path) as conn:
                 row = conn.execute(
-                    "SELECT balance, balance_usd, is_high_value FROM leaked_keys"
+                    "SELECT balance, balance_usd FROM leaked_keys"
                 ).fetchone()
+                columns = {info[1] for info in conn.execute("PRAGMA table_info(leaked_keys)")}
             assert row[0] in ("", None)
             assert row[1] == 0
-            assert row[2] == 0
+            assert "is_high_value" not in columns
 
     asyncio.run(run())
 
@@ -56,6 +57,16 @@ def _fail(name):
     return _inner
 
 
+def test_platform_checks_do_not_flag_high_value():
+    import inspect
+    import validator
+
+    source = inspect.getsource(validator.AsyncValidator)
+    assert "is_high_value=True" not in source
+    assert "is_high_value=balance" not in source
+
+
 if __name__ == "__main__":
     test_process_result_does_not_score_or_store_value()
+    test_platform_checks_do_not_flag_high_value()
     print("process result ok")

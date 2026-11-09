@@ -78,7 +78,7 @@ def export_keys_csv(db_path: str, output_file: str, status_filter: str = None, r
 
     fieldnames = [
         "id", "platform", "status", "api_key", "base_url", "balance",
-        "source_url", "model_tier", "rpm", "is_high_value", "found_time",
+        "source_url", "model_tier", "rpm", "found_time",
     ]
 
     with open(output_file, "w", encoding="utf-8", newline="") as f:
@@ -95,7 +95,6 @@ def export_keys_csv(db_path: str, output_file: str, status_filter: str = None, r
                 "source_url": key.source_url,
                 "model_tier": key.model_tier,
                 "rpm": key.rpm,
-                "is_high_value": int(bool(getattr(key, "is_high_value", False))),
                 "found_time": key.found_time.isoformat() if getattr(key, "found_time", None) else "",
             })
 

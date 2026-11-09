@@ -47,7 +47,6 @@ class AsyncDatabase:
                     source_url TEXT DEFAULT '',
                     model_tier TEXT DEFAULT '',
                     rpm INTEGER DEFAULT 0,
-                    is_high_value BOOLEAN DEFAULT 0,
                     found_time DATETIME DEFAULT CURRENT_TIMESTAMP,
                     verified_time DATETIME
                 )
@@ -82,6 +81,10 @@ class AsyncDatabase:
                 )
             except Exception:
                 pass
+            async with db.execute("PRAGMA table_info(leaked_keys)") as cursor:
+                columns = {row[1] for row in await cursor.fetchall()}
+            if "is_high_value" in columns:
+                await db.execute("ALTER TABLE leaked_keys DROP COLUMN is_high_value")
 
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS scanned_blobs (
@@ -128,13 +131,12 @@ class AsyncDatabase:
                 try:
                     await db.execute("""
                         INSERT OR IGNORE INTO leaked_keys
-                        (platform, api_key, key_hash, base_url, status, balance, source_url, model_tier, rpm, is_high_value, found_time)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        (platform, api_key, key_hash, base_url, status, balance, source_url, model_tier, rpm, found_time)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
                         key.platform, vault.encrypt(key.api_key), vault.hash_key(key.api_key),
                         key.base_url, key.status,
                         key.balance, key.source_url, key.model_tier, key.rpm,
-                        1 if key.is_high_value else 0,
                         key.found_time.isoformat() if key.found_time else datetime.now().isoformat()
                     ))
                 except Exception as e:
@@ -190,15 +192,15 @@ class AsyncDatabase:
         rpm: int = 0,
         is_high_value: bool = False
     ):
-        """更新 Key 状态（按 key_hash 指纹定位）"""
+        """更新 Key 状态（按 key_hash 指纹定位）。is_high_value 不再写入。"""
+        del is_high_value
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("""
                 UPDATE leaked_keys
-                SET status = ?, balance = ?, model_tier = ?, rpm = ?, is_high_value = ?, verified_time = ?
+                SET status = ?, balance = ?, model_tier = ?, rpm = ?, verified_time = ?
                 WHERE key_hash = ?
             """, (
                 status.value, balance, model_tier, rpm,
-                1 if is_high_value else 0,
                 datetime.now().isoformat(), vault.hash_key(api_key)
             ))
             await db.commit()

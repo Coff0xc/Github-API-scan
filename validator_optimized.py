@@ -48,7 +48,6 @@ from validator import (
     ValidationResult,
     MAX_CONCURRENCY,
     REQUEST_TIMEOUT,
-    HIGH_VALUE_MODELS,
     RPM_ENTERPRISE_THRESHOLD,
     RPM_FREE_TRIAL_THRESHOLD
 )
@@ -367,7 +366,7 @@ class OptimizedAsyncValidator:
                         data = await resp.json()
                         models_list = [m.get("id", "") for m in data.get("data", [])]
 
-                        # 检测高价值模型
+                        # 记录模型档位，不据此标记高价值
                         for m in models_list:
                             if any(hv in m.lower() for hv in ['gpt-4', 'gpt-4o']):
                                 model_tier = "GPT-4"

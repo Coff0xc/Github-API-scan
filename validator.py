@@ -468,7 +468,7 @@ class AsyncValidator:
                         data = await resp.json()
                         models_list = [m.get("id", "") for m in data.get("data", [])]
                         
-                        # 检测高价值模型
+                        # 记录模型档位，不据此标记高价值
                         for m in models_list:
                             if any(hv in m.lower() for hv in ['gpt-4', 'gpt-4o']):
                                 model_tier = "GPT-4"
@@ -638,13 +638,16 @@ class AsyncValidator:
                     # 尝试解析模型信息
                     try:
                         data = await resp.json()
-                        model_used = data.get("model", "claude-3")
-                        # 检测是否为高价值模型 (Opus/Sonnet)
-                        is_high = "opus" in model_used.lower() or "sonnet" in model_used.lower()
-                        tier = "Claude-3-Opus" if "opus" in model_used.lower() else "Claude-3"
-                        return ValidationResult(KeyStatus.VALID, "Claude有效", tier, 0, 0.0, is_high)
+                        model_used = data.get("model", "claude-3").lower()
+                        if "opus" in model_used:
+                            tier = "Claude-3-Opus"
+                        elif "sonnet" in model_used:
+                            tier = "Claude-3-Sonnet"
+                        else:
+                            tier = "Claude-3"
+                        return ValidationResult(KeyStatus.VALID, "Claude有效", tier)
                     except Exception:
-                        return ValidationResult(KeyStatus.VALID, "Claude有效", "Claude-3", 0, 0.0, True)
+                        return ValidationResult(KeyStatus.VALID, "Claude有效", "Claude-3")
                 
                 elif resp.status == 400:
                     # 关键：检查是否为余额不足（Key 有效但没钱）
@@ -1158,9 +1161,8 @@ class AsyncValidator:
                 headers=headers, proxy=proxy
             ) as resp:
                 if resp.status == 200:
-                    data = await resp.json()
-                    balance = sum(b.get('amount', 0) for b in data.get('available', [])) / 100
-                    return ValidationResult(KeyStatus.VALID, f"Stripe ${balance:.2f}", is_high_value=balance > 0)
+                    await resp.read()
+                    return ValidationResult(KeyStatus.VALID, "Stripe 有效")
                 elif resp.status == 401:
                     return ValidationResult(KeyStatus.INVALID, "无效")
         except Exception as e:
@@ -1393,7 +1395,7 @@ class AsyncValidator:
                 if resp.status == 200:
                     data = await resp.json()
                     models = data.get("data", [])
-                    return ValidationResult(KeyStatus.VALID, f"OpenRouter 有效 ({len(models)}模型)", is_high_value=True)
+                    return ValidationResult(KeyStatus.VALID, f"OpenRouter 有效 ({len(models)}模型)")
                 elif resp.status == 401:
                     return ValidationResult(KeyStatus.INVALID, "无效")
                 elif resp.status == 429:
@@ -1417,7 +1419,7 @@ class AsyncValidator:
                 headers=headers, proxy=proxy
             ) as resp:
                 if resp.status == 200:
-                    return ValidationResult(KeyStatus.VALID, "Portkey 有效", is_high_value=True)
+                    return ValidationResult(KeyStatus.VALID, "Portkey 有效")
                 elif resp.status == 401:
                     return ValidationResult(KeyStatus.INVALID, "无效")
                 elif resp.status == 429:
@@ -1443,7 +1445,7 @@ class AsyncValidator:
                 if resp.status == 200:
                     data = await resp.json()
                     models = data.get("data", [])
-                    return ValidationResult(KeyStatus.VALID, f"LiteLLM 有效 ({len(models)}模型)", is_high_value=True)
+                    return ValidationResult(KeyStatus.VALID, f"LiteLLM 有效 ({len(models)}模型)")
                 elif resp.status == 401:
                     return ValidationResult(KeyStatus.INVALID, "无效")
                 elif resp.status == 429:
@@ -1495,7 +1497,7 @@ class AsyncValidator:
                 headers=headers, proxy=proxy
             ) as resp:
                 if resp.status == 200:
-                    return ValidationResult(KeyStatus.VALID, "xAI Grok 有效", is_high_value=True)
+                    return ValidationResult(KeyStatus.VALID, "xAI Grok 有效")
                 elif resp.status == 401:
                     return ValidationResult(KeyStatus.INVALID, "无效")
                 elif resp.status == 429:
@@ -1519,7 +1521,7 @@ class AsyncValidator:
                 headers=headers, proxy=proxy
             ) as resp:
                 if resp.status == 200:
-                    return ValidationResult(KeyStatus.VALID, "Meta Llama 有效", is_high_value=True)
+                    return ValidationResult(KeyStatus.VALID, "Meta Llama 有效")
                 elif resp.status == 401:
                     return ValidationResult(KeyStatus.INVALID, "无效")
                 elif resp.status == 429:

@@ -142,7 +142,6 @@ class Database:
                         source_url TEXT DEFAULT '',
                         model_tier TEXT DEFAULT '',
                         rpm INTEGER DEFAULT 0,
-                        is_high_value BOOLEAN DEFAULT 0,
                         found_time DATETIME DEFAULT CURRENT_TIMESTAMP,
                         verified_time DATETIME,
 
@@ -192,10 +191,9 @@ class Database:
                     cursor.execute("ALTER TABLE leaked_keys ADD COLUMN rpm INTEGER DEFAULT 0")
                 except sqlite3.OperationalError:
                     pass
-                try:
-                    cursor.execute("ALTER TABLE leaked_keys ADD COLUMN is_high_value BOOLEAN DEFAULT 0")
-                except sqlite3.OperationalError:
-                    pass
+                columns = {row[1] for row in cursor.execute("PRAGMA table_info(leaked_keys)")}
+                if "is_high_value" in columns:
+                    cursor.execute("ALTER TABLE leaked_keys DROP COLUMN is_high_value")
 
                 # 深度验证字段迁移
                 deep_validation_fields = [
@@ -373,11 +371,11 @@ class Database:
                 try:
                     cursor.execute("""
                         INSERT INTO leaked_keys
-                        (platform, api_key, key_hash, base_url, status, balance, source_url, model_tier, rpm, is_high_value, found_time,
+                        (platform, api_key, key_hash, base_url, status, balance, source_url, model_tier, rpm, found_time,
                          balance_usd, used_quota_usd, total_quota_usd, tpm, rpd,
                          has_gpt4, has_gpt5, has_claude_opus, organization, account_name,
                          expiration_date, key_type, value_score)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
                         key.platform,
                         vault.encrypt(key.api_key),
@@ -388,7 +386,6 @@ class Database:
                         key.source_url,
                         key.model_tier,
                         key.rpm,
-                        1 if key.is_high_value else 0,
                         key.found_time.isoformat() if key.found_time else datetime.now().isoformat(),
                         key.balance_usd,
                         key.used_quota_usd,
@@ -416,7 +413,7 @@ class Database:
         balance: str = "",
         model_tier: str = "",
         rpm: int = 0,
-        is_high_value: bool = False,
+        is_high_value: bool = False,  # 旧调用仍可传入，不再写入
         # 深度验证参数
         balance_usd: float = 0.0,
         used_quota_usd: float = 0.0,
@@ -441,7 +438,7 @@ class Database:
             balance: 余额/附加信息（向后兼容）
             model_tier: 模型阶梯
             rpm: RPM 限制
-            is_high_value: 是否高价值
+            is_high_value: 已忽略，列已删除
             balance_usd: 余额（美元）
             used_quota_usd: 已用额度
             total_quota_usd: 总额度
@@ -459,14 +456,13 @@ class Database:
                 cursor = conn.cursor()
                 cursor.execute("""
                     UPDATE leaked_keys
-                    SET status = ?, balance = ?, model_tier = ?, rpm = ?, is_high_value = ?, verified_time = ?,
+                    SET status = ?, balance = ?, model_tier = ?, rpm = ?, verified_time = ?,
                         balance_usd = ?, used_quota_usd = ?, total_quota_usd = ?, tpm = ?, rpd = ?,
                         has_gpt4 = ?, has_gpt5 = ?, has_claude_opus = ?,
                         organization = ?, account_name = ?, expiration_date = ?, key_type = ?, value_score = ?
                     WHERE key_hash = ?
                 """, (
                     status.value, balance, model_tier, rpm,
-                    1 if is_high_value else 0,
                     datetime.now().isoformat(),
                     balance_usd, used_quota_usd, total_quota_usd, tpm, rpd,
                     1 if has_gpt4 else 0,
@@ -614,7 +610,6 @@ class Database:
             source_url=row_dict.get("source_url") or "",
             model_tier=row_dict.get("model_tier") or "",
             rpm=row_dict.get("rpm") or 0,
-            is_high_value=bool(row_dict.get("is_high_value", 0)),
             found_time=datetime.fromisoformat(row_dict["found_time"]) if row_dict.get("found_time") else None
         )
 
