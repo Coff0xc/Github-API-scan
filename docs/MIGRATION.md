@@ -1,6 +1,6 @@
-# 迁移指南 - 从原版到优化版
+# 迁移指南
 
-本指南帮助你从原版 `main.py` 平滑迁移到优化版 `main_optimized.py`。
+当前唯一入口是 `main_v2.2.py`。旧的 `main.py`、`main_optimized.py`、`main_v2.1.py` 已删除。下面的命令把入口名换成 `main_v2.2.py` 即可。
 
 ---
 

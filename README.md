@@ -216,26 +216,15 @@ database:
 ## Project structure
 
 ```
-├── main_v2.2.py          # Only implementation
-├── main.py               # Shim. Forwards arguments to main_v2.2.py
-├── main_v2.1.py          # Shim
-├── main_optimized.py     # Shim
-│
-├── scanner.py            # GitHub scanning (requires an org or repo)
-├── validator_optimized.py # Validation path used by main_v2.2.py
-├── validator.py          # Shared validation primitives
-├── database.py           # SQLite storage
-├── config.py             # Platform config (50+ platforms)
-│
-├── cache_manager.py      # Smart caching
-├── batch_validator.py    # Batch processing
-├── connection_pool.py    # HTTP connection reuse
-├── retry_handler.py      # Retry logic
-│
-├── source_*.py           # Additional sources (Gist, GitLab, etc.)
-├── monitor.py            # Real-time monitoring
-├── ui.py                 # Terminal UI
-└── config.yaml           # User config
+├── main_v2.2.py           # Only entry point
+├── scanner.py             # GitHub scanning (requires an org or repo)
+├── validator_optimized.py # Validation path used by the entry point
+├── validator.py           # Shared validation primitives
+├── findings_feed.py       # Redacted findings for an external agent
+├── database.py            # SQLite storage
+├── web_dashboard.py       # Local dashboard
+├── config.py              # Platform config
+└── config.yaml            # User config
 ```
 
 ## Version history
@@ -321,15 +310,11 @@ pre-commit install
 - [USAGE_GUIDE.md](docs/USAGE_GUIDE.md) - 完整使用说明
 - [AI_ASSISTED_ANALYSIS.md](docs/AI_ASSISTED_ANALYSIS.md) - AI 辅助假阳性过滤接入（Ollama / OpenAI 兼容 API）
 - [DOCKER_GUIDE.md](docs/DOCKER_GUIDE.md) - Docker 部署
-- [FOFA_GUIDE.md](docs/FOFA_GUIDE.md) - FOFA 扩展源
 - [WEB_DASHBOARD_GUIDE.md](docs/WEB_DASHBOARD_GUIDE.md) - Web 面板
-- [DEEP_VALIDATION_GUIDE.md](docs/DEEP_VALIDATION_GUIDE.md) - 深度验证
-- [REALTIME_PIPELINE_GUIDE.md](docs/REALTIME_PIPELINE_GUIDE.md) - 实时通知管道
 - [NOTIFY_README.md](docs/NOTIFY_README.md) - 通知渠道配置
 - [OPTIMIZATION.md](docs/OPTIMIZATION.md) - Technical details
 - [MIGRATION.md](docs/MIGRATION.md) - Upgrade guide
 - [CHANGELOG_V3.0.md](docs/CHANGELOG_V3.0.md) - What's new
-- [archive/](docs/archive/) - 历史过程文档（50+ 份开发报告存档）
 
 ## Contributing
 

@@ -50,7 +50,7 @@ GITHUB_TOKENS = [
 
 ### 启动扫描
 
-唯一实现是 `main_v2.2.py`。`main.py`、`main_v2.1.py`、`main_optimized.py` 只把参数转交给它。
+唯一入口是 `main_v2.2.py`。
 
 远程扫描必须同时满足：
 
