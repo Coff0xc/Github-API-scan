@@ -3,106 +3,111 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>发现记录</title>
+    <meta name="color-scheme" content="light">
+    <title>Findings</title>
     <link rel="stylesheet" href="/static/css/dashboard.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
     <div class="container">
-        <!-- Header -->
-        <header>
-            <h1>发现记录</h1>
-            <div class="status" id="status">
-                <span class="status-indicator"></span>
-                <span id="status-text">Idle</span>
+        <header class="topbar">
+            <div class="brand">
+                <p class="product">AI API Key Scanner</p>
+                <h1 data-i18n="title">Findings</h1>
+            </div>
+            <div class="topbar-side">
+                <div class="lang-switch" role="group" aria-label="Language">
+                    <button type="button" data-set-lang="en" aria-pressed="true">EN</button>
+                    <button type="button" data-set-lang="zh" aria-pressed="false">中文</button>
+                </div>
+                <div class="status" id="status">
+                    <span class="status-indicator"></span>
+                    <span id="status-text" data-i18n="idle">Idle</span>
+                </div>
             </div>
         </header>
 
-        <!-- Stats Cards -->
-        <div class="stats-grid">
-            <div class="stat-card">
-                <div class="stat-label">全部</div>
+        <section class="stats-grid" aria-label="Summary">
+            <article class="stat-card">
+                <div class="stat-label" data-i18n="all">All</div>
                 <div class="stat-value" id="total-findings">0</div>
-            </div>
-            <div class="stat-card open">
-                <div class="stat-label">待处置</div>
+            </article>
+            <article class="stat-card open">
+                <div class="stat-label" data-i18n="open">Open</div>
                 <div class="stat-value" id="open-findings">0</div>
-            </div>
-            <div class="stat-card notified">
-                <div class="stat-label">已通知</div>
+            </article>
+            <article class="stat-card notified">
+                <div class="stat-label" data-i18n="notified">Notified</div>
                 <div class="stat-value" id="notified-findings">0</div>
-            </div>
-            <div class="stat-card rotated">
-                <div class="stat-label">已轮换</div>
+            </article>
+            <article class="stat-card rotated">
+                <div class="stat-label" data-i18n="rotated">Rotated</div>
                 <div class="stat-value" id="rotated-findings">0</div>
-            </div>
-        </div>
+            </article>
+        </section>
 
-        <!-- Charts -->
-        <div class="charts-grid">
-            <div class="chart-card">
-                <h3>平台</h3>
-                <canvas id="platformChart"></canvas>
-            </div>
-            <div class="chart-card">
-                <h3>处置状态</h3>
-                <canvas id="statusChart"></canvas>
-            </div>
-        </div>
+        <section class="charts-grid">
+            <article class="chart-card">
+                <h2 data-i18n="platforms">Platforms</h2>
+                <div class="chart-wrap">
+                    <canvas id="platformChart"></canvas>
+                </div>
+            </article>
+            <article class="chart-card">
+                <h2 data-i18n="dispositionChart">Disposition</h2>
+                <div class="chart-wrap">
+                    <canvas id="statusChart"></canvas>
+                </div>
+            </article>
+        </section>
 
-        <!-- Filters and Search -->
-        <div class="controls">
+        <section class="controls">
             <div class="filter-group">
-                <label>处置</label>
+                <label for="filter-disposition" data-i18n="disposition">Disposition</label>
                 <select id="filter-disposition">
-                    <option value="">全部</option>
-                    <option value="open">待处置</option>
-                    <option value="notified">已通知</option>
-                    <option value="rotated">已轮换</option>
-                    <option value="false_positive">误报</option>
+                    <option value="" data-i18n="all">All</option>
                 </select>
             </div>
             <div class="filter-group">
-                <label>平台</label>
+                <label for="filter-platform" data-i18n="platform">Platform</label>
                 <select id="filter-platform">
-                    <option value="">全部</option>
+                    <option value="" data-i18n="all">All</option>
                 </select>
             </div>
-            <div class="filter-group">
-                <input type="text" id="search-input" placeholder="指纹、位置或预览">
+            <div class="filter-group grow">
+                <label class="sr-only" for="search-input" data-i18n="searchLabel">Search</label>
+                <input type="search" id="search-input" data-i18n-placeholder="search" placeholder="Fingerprint, location, or preview">
             </div>
             <div class="filter-group">
-                <label for="dashboard-token">令牌</label>
+                <label for="dashboard-token" data-i18n="token">Token</label>
                 <input type="password" id="dashboard-token" autocomplete="current-password" placeholder="X-API-Token">
             </div>
-            <span id="disposition-message" class="stat-label"></span>
-        </div>
+            <span id="disposition-message" class="message" role="status"></span>
+        </section>
 
-        <!-- Keys Table -->
         <div class="table-container">
             <table id="findings-table">
                 <thead>
                     <tr>
-                        <th>指纹</th>
-                        <th>平台</th>
-                        <th>预览</th>
-                        <th>位置</th>
-                        <th>处置</th>
+                        <th data-i18n="fingerprint">Fingerprint</th>
+                        <th data-i18n="platform">Platform</th>
+                        <th data-i18n="preview">Preview</th>
+                        <th data-i18n="location">Location</th>
+                        <th data-i18n="disposition">Disposition</th>
                     </tr>
                 </thead>
                 <tbody id="findings-tbody">
                     <tr>
-                        <td colspan="5" class="loading">加载中</td>
+                        <td colspan="5" class="loading" data-i18n="loading">Loading</td>
                     </tr>
                 </tbody>
             </table>
         </div>
 
-        <!-- Pagination -->
         <div class="pagination">
-            <button id="prev-btn" disabled>上一页</button>
-            <span id="page-info">第 1 页</span>
-            <button id="next-btn">下一页</button>
+            <button id="prev-btn" type="button" disabled data-i18n="prev">Previous</button>
+            <span id="page-info">Page 1 of 1</span>
+            <button id="next-btn" type="button" data-i18n="next">Next</button>
         </div>
     </div>
 

@@ -1,19 +1,78 @@
-// 本机面板默认展示发现记录，不展示密钥表。
+// Local findings dashboard. The table never renders a raw key.
 
 let currentPage = 0;
 const pageSize = 50;
 let platformChart = null;
 let statusChart = null;
 let allFindings = [];
+let lang = "en";
 
-const DISPOSITION_LABELS = {
-    open: '待处置',
-    notified: '已通知',
-    rotated: '已轮换',
-    false_positive: '误报',
+const I18N = {
+    en: {
+        title: "Findings",
+        all: "All",
+        open: "Open",
+        notified: "Notified",
+        rotated: "Rotated",
+        false_positive: "False positive",
+        platforms: "Platforms",
+        dispositionChart: "Disposition",
+        disposition: "Disposition",
+        platform: "Platform",
+        fingerprint: "Fingerprint",
+        preview: "Preview",
+        location: "Location",
+        searchLabel: "Search",
+        search: "Fingerprint, location, or preview",
+        token: "Token",
+        loading: "Loading",
+        empty: "No findings yet.",
+        loadError: "Could not load findings.",
+        idle: "Idle",
+        scanning: "Scanning",
+        prev: "Previous",
+        next: "Next",
+        updating: "Saving disposition…",
+        updated: "Disposition saved.",
+        saveError: "Disposition was not saved.",
+        findingsCount: "Findings",
+    },
+    zh: {
+        title: "发现记录",
+        all: "全部",
+        open: "待处置",
+        notified: "已通知",
+        rotated: "已轮换",
+        false_positive: "误报",
+        platforms: "平台",
+        dispositionChart: "处置状态",
+        disposition: "处置",
+        platform: "平台",
+        fingerprint: "指纹",
+        preview: "预览",
+        location: "位置",
+        searchLabel: "搜索",
+        search: "指纹、位置或预览",
+        token: "令牌",
+        loading: "加载中",
+        empty: "没有发现记录",
+        loadError: "发现记录加载失败",
+        idle: "空闲",
+        scanning: "扫描中",
+        prev: "上一页",
+        next: "下一页",
+        updating: "正在更新处置状态",
+        updated: "已更新",
+        saveError: "处置状态没有写回",
+        findingsCount: "发现",
+    },
 };
 
-document.addEventListener('DOMContentLoaded', () => {
+const DISPOSITIONS = ["open", "notified", "rotated", "false_positive"];
+
+document.addEventListener("DOMContentLoaded", () => {
+    lang = preferredLang();
+    applyLanguage();
     loadFindings();
     loadStats();
     initCharts();
@@ -23,43 +82,102 @@ document.addEventListener('DOMContentLoaded', () => {
     setInterval(loadFindings, 10000);
 });
 
+function t(key) {
+    return (I18N[lang] && I18N[lang][key]) || I18N.en[key] || key;
+}
+
+function preferredLang() {
+    const query = new URLSearchParams(window.location.search).get("lang");
+    if (query === "en" || query === "zh") {
+        return query;
+    }
+    const saved = localStorage.getItem("dashboardLang");
+    if (saved === "en" || saved === "zh") {
+        return saved;
+    }
+    return (navigator.language || "").toLowerCase().startsWith("zh") ? "zh" : "en";
+}
+
+function applyLanguage() {
+    document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
+    document.title = t("title");
+    document.querySelectorAll("[data-i18n]").forEach((node) => {
+        node.textContent = t(node.getAttribute("data-i18n"));
+    });
+    document.querySelectorAll("[data-i18n-placeholder]").forEach((node) => {
+        node.placeholder = t(node.getAttribute("data-i18n-placeholder"));
+    });
+    document.querySelectorAll("[data-set-lang]").forEach((button) => {
+        button.setAttribute("aria-pressed", button.getAttribute("data-set-lang") === lang ? "true" : "false");
+    });
+    rebuildDispositionFilter();
+    if (platformChart) {
+        platformChart.data.datasets[0].label = t("findingsCount");
+        platformChart.update();
+    }
+    if (statusChart) {
+        statusChart.data.labels = DISPOSITIONS.map((name) => t(name));
+        statusChart.update();
+    }
+    if (allFindings.length || document.getElementById("findings-tbody").children.length) {
+        renderCurrentPage();
+    }
+}
+
+function rebuildDispositionFilter() {
+    const select = document.getElementById("filter-disposition");
+    const selected = select.value;
+    select.innerHTML = `<option value="">${escapeHtml(t("all"))}</option>` +
+        DISPOSITIONS.map((name) => `<option value="${name}">${escapeHtml(t(name))}</option>`).join("");
+    select.value = selected;
+}
+
 function setupEventListeners() {
-    document.getElementById('filter-disposition').addEventListener('change', () => {
+    document.getElementById("filter-disposition").addEventListener("change", () => {
         currentPage = 0;
         renderCurrentPage();
     });
 
-    document.getElementById('filter-platform').addEventListener('change', () => {
+    document.getElementById("filter-platform").addEventListener("change", () => {
         currentPage = 0;
         renderCurrentPage();
     });
 
-    document.getElementById('search-input').addEventListener('input', debounce(() => {
+    document.getElementById("search-input").addEventListener("input", debounce(() => {
         currentPage = 0;
         renderCurrentPage();
     }, 300));
 
-    document.getElementById('prev-btn').addEventListener('click', () => {
+    document.getElementById("prev-btn").addEventListener("click", () => {
         if (currentPage > 0) {
             currentPage--;
             renderCurrentPage();
         }
     });
 
-    document.getElementById('next-btn').addEventListener('click', () => {
+    document.getElementById("next-btn").addEventListener("click", () => {
         currentPage++;
         renderCurrentPage();
     });
 
-    const tokenInput = document.getElementById('dashboard-token');
-    tokenInput.value = sessionStorage.getItem('dashboardToken') || '';
-    tokenInput.addEventListener('change', () => {
-        sessionStorage.setItem('dashboardToken', tokenInput.value.trim());
+    document.querySelectorAll("[data-set-lang]").forEach((button) => {
+        button.addEventListener("click", () => {
+            lang = button.getAttribute("data-set-lang");
+            localStorage.setItem("dashboardLang", lang);
+            applyLanguage();
+            loadStats();
+        });
     });
 
-    document.getElementById('findings-tbody').addEventListener('change', (event) => {
+    const tokenInput = document.getElementById("dashboard-token");
+    tokenInput.value = sessionStorage.getItem("dashboardToken") || "";
+    tokenInput.addEventListener("change", () => {
+        sessionStorage.setItem("dashboardToken", tokenInput.value.trim());
+    });
+
+    document.getElementById("findings-tbody").addEventListener("change", (event) => {
         const select = event.target;
-        if (!select.classList.contains('disposition-select')) {
+        if (!select.classList.contains("disposition-select")) {
             return;
         }
         setDisposition(select.dataset.fingerprint, select.value, select);
@@ -68,50 +186,52 @@ function setupEventListeners() {
 
 async function loadStats() {
     try {
-        const response = await fetch('/api/stats');
+        const response = await fetch("/api/stats");
         const stats = await response.json();
         const counts = stats.dispositions || {};
 
-        document.getElementById('total-findings').textContent = stats.total_keys || 0;
-        document.getElementById('open-findings').textContent = counts.open || 0;
-        document.getElementById('notified-findings').textContent = counts.notified || 0;
-        document.getElementById('rotated-findings').textContent = counts.rotated || 0;
+        document.getElementById("total-findings").textContent = stats.total_keys || 0;
+        document.getElementById("open-findings").textContent = counts.open || 0;
+        document.getElementById("notified-findings").textContent = counts.notified || 0;
+        document.getElementById("rotated-findings").textContent = counts.rotated || 0;
 
+        const statusText = document.getElementById("status-text");
+        const dot = document.querySelector(".status-indicator");
         if (stats.is_running) {
-            document.getElementById('status-text').textContent = '扫描中';
-            document.querySelector('.status-indicator').style.background = '#10b981';
+            statusText.textContent = t("scanning");
+            dot.style.background = "#059669";
         } else {
-            document.getElementById('status-text').textContent = '空闲';
-            document.querySelector('.status-indicator').style.background = '#6b7280';
+            statusText.textContent = t("idle");
+            dot.style.background = "#9aa6b2";
         }
 
         updateCharts(stats);
     } catch (error) {
-        console.error('Failed to load stats:', error);
+        console.error("Failed to load stats:", error);
     }
 }
 
 async function loadFindings() {
     try {
-        const response = await fetch('/api/findings');
+        const response = await fetch("/api/findings");
         const data = await response.json();
         allFindings = Array.isArray(data.findings) ? data.findings : [];
         fillPlatforms(allFindings);
         renderCurrentPage();
     } catch (error) {
-        console.error('Failed to load findings:', error);
-        document.getElementById('findings-tbody').innerHTML =
-            '<tr><td colspan="5" class="loading">发现记录加载失败</td></tr>';
+        console.error("Failed to load findings:", error);
+        document.getElementById("findings-tbody").innerHTML =
+            `<tr><td colspan="5" class="loading">${escapeHtml(t("loadError"))}</td></tr>`;
     }
 }
 
 function fillPlatforms(findings) {
-    const select = document.getElementById('filter-platform');
+    const select = document.getElementById("filter-platform");
     const selected = select.value;
-    const names = [...new Set(findings.map(item => item.platform).filter(Boolean))].sort();
-    select.innerHTML = '<option value="">全部</option>';
-    names.forEach(platform => {
-        const option = document.createElement('option');
+    const names = [...new Set(findings.map((item) => item.platform).filter(Boolean))].sort();
+    select.innerHTML = `<option value="">${escapeHtml(t("all"))}</option>`;
+    names.forEach((platform) => {
+        const option = document.createElement("option");
         option.value = platform;
         option.textContent = platform;
         select.appendChild(option);
@@ -122,11 +242,11 @@ function fillPlatforms(findings) {
 }
 
 function filteredFindings() {
-    const disposition = document.getElementById('filter-disposition').value;
-    const platform = document.getElementById('filter-platform').value;
-    const search = document.getElementById('search-input').value.trim().toLowerCase();
+    const disposition = document.getElementById("filter-disposition").value;
+    const platform = document.getElementById("filter-platform").value;
+    const search = document.getElementById("search-input").value.trim().toLowerCase();
 
-    return allFindings.filter(item => {
+    return allFindings.filter((item) => {
         if (disposition && item.disposition !== disposition) {
             return false;
         }
@@ -143,7 +263,7 @@ function filteredFindings() {
             item.repo,
             item.path,
             item.platform,
-        ].join(' ').toLowerCase();
+        ].join(" ").toLowerCase();
         return haystack.includes(search);
     });
 }
@@ -157,79 +277,97 @@ function renderCurrentPage() {
 }
 
 function renderFindings(findings) {
-    const tbody = document.getElementById('findings-tbody');
+    const tbody = document.getElementById("findings-tbody");
 
     if (findings.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" class="loading">没有发现记录</td></tr>';
+        tbody.innerHTML = `<tr><td colspan="5" class="loading">${escapeHtml(t("empty"))}</td></tr>`;
         return;
     }
 
-    tbody.innerHTML = findings.map(item => {
-        const disposition = item.disposition || 'open';
-        const label = DISPOSITION_LABELS[disposition] || disposition;
+    tbody.innerHTML = findings.map((item) => {
+        const disposition = item.disposition || "open";
         return `
         <tr>
-            <td class="fingerprint">${escapeHtml(item.fingerprint || '')}</td>
-            <td><span class="platform-badge">${escapeHtml(item.platform || '')}</span></td>
-            <td><code class="key-text">${escapeHtml(item.preview || '')}</code></td>
-            <td>${locationCell(item.location)}</td>
+            <td class="fingerprint" title="${escapeHtml(item.fingerprint || "")}">${escapeHtml(shortFingerprint(item.fingerprint))}</td>
+            <td><span class="platform-badge">${escapeHtml(item.platform || "")}</span></td>
+            <td><code class="key-text">${escapeHtml(item.preview || "")}</code></td>
+            <td>${locationCell(item)}</td>
             <td>${dispositionSelect(item.fingerprint, disposition)}</td>
         </tr>`;
-    }).join('');
+    }).join("");
+}
+
+function shortFingerprint(value) {
+    const text = value || "";
+    if (text.length <= 18) {
+        return text;
+    }
+    return `${text.slice(0, 8)}…${text.slice(-6)}`;
 }
 
 function dispositionSelect(fingerprint, current) {
-    const options = Object.entries(DISPOSITION_LABELS).map(([value, label]) => {
-        const selected = value === current ? ' selected' : '';
-        return `<option value="${value}"${selected}>${label}</option>`;
-    }).join('');
-    return `<select class="disposition-select" data-fingerprint="${escapeHtml(fingerprint || '')}" data-current="${escapeHtml(current)}">${options}</select>`;
+    const options = DISPOSITIONS.map((value) => {
+        const selected = value === current ? " selected" : "";
+        return `<option value="${value}"${selected}>${escapeHtml(t(value))}</option>`;
+    }).join("");
+    return `<select class="disposition-select status-${escapeHtml(current)}" data-fingerprint="${escapeHtml(fingerprint || "")}" data-current="${escapeHtml(current)}">${options}</select>`;
 }
 
 async function setDisposition(fingerprint, disposition, select) {
-    const message = document.getElementById('disposition-message');
-    const token = (document.getElementById('dashboard-token').value || '').trim();
-    sessionStorage.setItem('dashboardToken', token);
-    message.textContent = '正在更新处置状态';
+    const message = document.getElementById("disposition-message");
+    const token = (document.getElementById("dashboard-token").value || "").trim();
+    sessionStorage.setItem("dashboardToken", token);
+    message.textContent = t("updating");
     try {
-        const response = await fetch('/api/findings/disposition', {
-            method: 'POST',
+        const response = await fetch("/api/findings/disposition", {
+            method: "POST",
             headers: {
-                'Content-Type': 'application/json',
-                'X-API-Token': token,
+                "Content-Type": "application/json",
+                "X-API-Token": token,
             },
             body: JSON.stringify({ fingerprint, disposition }),
         });
         const body = await response.json().catch(() => ({}));
         if (!response.ok) {
-            select.value = select.dataset.current || 'open';
-            message.textContent = body.error || '处置状态没有写回';
+            select.value = select.dataset.current || "open";
+            message.textContent = body.error || t("saveError");
             return;
         }
         select.dataset.current = disposition;
-        const row = allFindings.find(item => item.fingerprint === fingerprint);
+        select.className = `disposition-select status-${disposition}`;
+        const row = allFindings.find((item) => item.fingerprint === fingerprint);
         if (row) {
             row.disposition = disposition;
         }
-        message.textContent = '已更新';
+        message.textContent = t("updated");
         loadStats();
     } catch (error) {
-        select.value = select.dataset.current || 'open';
-        message.textContent = '处置状态没有写回';
+        select.value = select.dataset.current || "open";
+        message.textContent = t("saveError");
         console.error(error);
     }
 }
 
-function locationCell(location) {
-    const value = location || '';
+function locationCell(item) {
+    const value = item.location || "";
     if (!value) {
-        return '-';
+        return "-";
     }
-    const safe = escapeHtml(value);
+    const place = readableLocation(item);
+    const inner = `<span class="loc"><span class="loc-repo">${escapeHtml(place.repo)}</span><span class="loc-path">${escapeHtml(place.path)}</span></span>`;
     if (/^https?:\/\//i.test(value)) {
-        return `<a href="${safe}" target="_blank" rel="noopener" class="source-link">${safe}</a>`;
+        return `<a href="${escapeHtml(value)}" target="_blank" rel="noopener" class="source-link" title="${escapeHtml(value)}">${inner}</a>`;
     }
-    return safe;
+    return inner;
+}
+
+function readableLocation(item) {
+    const repo = item.repo || "";
+    const path = item.path || "";
+    if (repo || path) {
+        return { repo: repo || path, path: repo ? path : "" };
+    }
+    return { repo: item.location || "-", path: "" };
 }
 
 function updatePagination(total) {
@@ -237,74 +375,111 @@ function updatePagination(total) {
     if (currentPage > totalPages - 1) {
         currentPage = totalPages - 1;
     }
-    document.getElementById('page-info').textContent =
-        `第 ${currentPage + 1} / ${totalPages} 页（${total} 条）`;
+    const label = lang === "zh"
+        ? `第 ${currentPage + 1} / ${totalPages} 页 · ${total} 条`
+        : `Page ${currentPage + 1} of ${totalPages} · ${total}`;
+    document.getElementById("page-info").textContent = label;
+    document.getElementById("prev-btn").disabled = currentPage === 0;
+    document.getElementById("next-btn").disabled = currentPage >= totalPages - 1;
+}
 
-    document.getElementById('prev-btn').disabled = currentPage === 0;
-    document.getElementById('next-btn').disabled = currentPage >= totalPages - 1;
+function chartFont() {
+    return { family: '"Segoe UI", sans-serif', size: 12 };
 }
 
 function initCharts() {
-    const platformCtx = document.getElementById('platformChart').getContext('2d');
-    const statusCtx = document.getElementById('statusChart').getContext('2d');
+    const platformCtx = document.getElementById("platformChart").getContext("2d");
+    const statusCtx = document.getElementById("statusChart").getContext("2d");
+    const common = {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+    };
 
     platformChart = new Chart(platformCtx, {
-        type: 'bar',
+        type: "bar",
         data: {
             labels: [],
             datasets: [{
-                label: '发现',
+                label: t("findingsCount"),
                 data: [],
-                backgroundColor: '#2563eb',
-            }]
+                backgroundColor: "#1d4ed8",
+                borderRadius: 6,
+                maxBarThickness: 28,
+            }],
         },
         options: {
-            responsive: true,
-            maintainAspectRatio: false,
+            ...common,
+            plugins: {
+                legend: { display: false },
+                tooltip: { titleFont: chartFont(), bodyFont: chartFont() },
+            },
             scales: {
-                y: { beginAtZero: true }
-            }
-        }
+                y: {
+                    beginAtZero: true,
+                    ticks: { precision: 0, stepSize: 1, color: "#5d6b7c", font: chartFont() },
+                    grid: { color: "#eef2f6" },
+                    border: { display: false },
+                },
+                x: {
+                    ticks: { color: "#5d6b7c", font: chartFont() },
+                    grid: { display: false },
+                    border: { display: false },
+                },
+            },
+        },
     });
 
     statusChart = new Chart(statusCtx, {
-        type: 'doughnut',
+        type: "doughnut",
         data: {
-            labels: ['待处置', '已通知', '已轮换', '误报'],
+            labels: DISPOSITIONS.map((name) => t(name)),
             datasets: [{
                 data: [0, 0, 0, 0],
-                backgroundColor: ['#2563eb', '#f59e0b', '#10b981', '#6b7280'],
-            }]
+                backgroundColor: ["#1d4ed8", "#d97706", "#059669", "#94a3b8"],
+                borderWidth: 2,
+                borderColor: "#ffffff",
+                hoverOffset: 0,
+            }],
         },
         options: {
-            responsive: true,
-            maintainAspectRatio: false,
-        }
+            ...common,
+            cutout: "68%",
+            plugins: {
+                legend: {
+                    position: "right",
+                    labels: {
+                        boxWidth: 10,
+                        boxHeight: 10,
+                        padding: 12,
+                        color: "#142033",
+                        font: chartFont(),
+                    },
+                },
+            },
+        },
     });
 }
 
 function updateCharts(stats) {
     if (platformChart && stats.top_platforms) {
-        platformChart.data.labels = stats.top_platforms.map(p => p.platform);
-        platformChart.data.datasets[0].data = stats.top_platforms.map(p => p.count);
+        platformChart.data.labels = stats.top_platforms.map((item) => item.platform);
+        platformChart.data.datasets[0].data = stats.top_platforms.map((item) => item.count);
+        platformChart.data.datasets[0].label = t("findingsCount");
         platformChart.update();
     }
 
     if (statusChart) {
         const counts = stats.dispositions || {};
-        statusChart.data.datasets[0].data = [
-            counts.open || 0,
-            counts.notified || 0,
-            counts.rotated || 0,
-            counts.false_positive || 0,
-        ];
+        statusChart.data.labels = DISPOSITIONS.map((name) => t(name));
+        statusChart.data.datasets[0].data = DISPOSITIONS.map((name) => counts[name] || 0);
         statusChart.update();
     }
 }
 
 function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text == null ? '' : String(text);
+    const div = document.createElement("div");
+    div.textContent = text == null ? "" : String(text);
     return div.innerHTML;
 }
 

@@ -221,10 +221,13 @@ def test_dashboard_home_lists_findings():
     client = web_dashboard.app.test_client()
     html = client.get("/").get_data(as_text=True)
     script = client.get("/static/js/dashboard.js").get_data(as_text=True)
-    assert "发现记录" in html
-    assert "指纹" in html
-    assert "预览" in html
-    assert "处置" in html
+    assert "Findings" in html
+    assert 'data-i18n="title"' in html
+    assert "发现记录" in script
+    assert "指纹" in script
+    assert "预览" in script
+    assert "处置" in script
+    assert "Findings" in script
     assert "High Value" not in html
     assert ">API Key<" not in html
     assert "export-btn" not in html
