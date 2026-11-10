@@ -27,10 +27,10 @@ python main_v2.2.py --authorized --target-org your-org
 
 ```bash
 cp notify_config.example.yaml notify_config.yaml
-python test_notifier.py --config notify_config.yaml --channel discord
+python check_notifier.py --config notify_config.yaml --channel discord
 ```
 
-`test_notifier.py` can still build sample messages at several severities. Those samples are for the channel test. A real scan does not include a balance or a model tier in the text that goes out.
+`check_notifier.py` can still build sample messages at several severities. Those samples are for the channel test. A real scan does not include a balance or a model tier in the text that goes out.
 
 ## What still filters a notice
 
@@ -66,4 +66,4 @@ DingTalk: group settings → Smart Assistant → Custom bot. Prefer the sign-sec
 
 The scan only notifies `valid` and `quota_exceeded`. An invalid key stays quiet. A missing webhook stays quiet and leaves the row `open`. A channel whose `min_severity` is `high` also stays quiet for a normal finding.
 
-Check the webhook with `python test_notifier.py --channel <name>`. Then check quiet hours and the rate limit in the yaml. Dedup is in memory for the process. A new process can send the same key again. The disposition on the row, once `notified`, is the record that a person already heard about it.
+Check the webhook with `python check_notifier.py --channel <name>`. Then check quiet hours and the rate limit in the yaml. Dedup is in memory for the process. A new process can send the same key again. The disposition on the row, once `notified`, is the record that a person already heard about it.

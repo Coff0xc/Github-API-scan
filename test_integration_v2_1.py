@@ -31,7 +31,7 @@ async def test_full_integration():
     print("=" * 60)
 
     # 初始化组件
-    db = AsyncDatabase("test_integration_v2.1.db")
+    db = AsyncDatabase("test_integration_v2_1.db")
     await db.init()
 
     monitor = get_monitor()
@@ -132,8 +132,8 @@ async def test_full_integration():
 
     # 删除测试数据库
     import os
-    if os.path.exists("test_integration_v2.1.db"):
-        os.remove("test_integration_v2.1.db")
+    if os.path.exists("test_integration_v2_1.db"):
+        os.remove("test_integration_v2_1.db")
 
     print("\n" + "=" * 60)
     print("集成测试完成!")

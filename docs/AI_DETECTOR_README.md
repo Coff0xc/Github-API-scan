@@ -60,13 +60,13 @@ ollama list
 
 ```bash
 # 检查后端可用性
-python test_ai_detector.py --check
+python check_ai_detector.py --check
 
 # 运行完整测试
-python test_ai_detector.py --all
+python check_ai_detector.py --all
 
 # 交互式测试
-python test_ai_detector.py --interactive
+python check_ai_detector.py --interactive
 ```
 
 ### 3. 在代码中使用
@@ -256,21 +256,21 @@ detector = AIDetector(cache_enabled=True, cache_size=1000)
 
 ```bash
 # 检查后端状态
-python test_ai_detector.py --check
+python check_ai_detector.py --check
 
 # 测试快速过滤器
-python test_ai_detector.py --quick
+python check_ai_detector.py --quick
 
 # 测试 AI 检测器
-python test_ai_detector.py --backend ollama
-python test_ai_detector.py --backend openai
-python test_ai_detector.py --backend mock
+python check_ai_detector.py --backend ollama
+python check_ai_detector.py --backend openai
+python check_ai_detector.py --backend mock
 
 # 运行所有测试
-python test_ai_detector.py --all
+python check_ai_detector.py --all
 
 # 交互式测试
-python test_ai_detector.py --interactive
+python check_ai_detector.py --interactive
 ```
 
 ## 推荐模型
@@ -288,7 +288,7 @@ python test_ai_detector.py --interactive
 ```
 ├── ai_detector.py              # AI 检测核心模块
 ├── ai_scanner_integration.py   # Scanner 集成模块
-├── test_ai_detector.py         # 测试脚本
+├── check_ai_detector.py         # 测试脚本
 └── AI_DETECTOR_README.md       # 本文档
 ```
 

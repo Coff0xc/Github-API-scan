@@ -180,7 +180,7 @@ async def test_optimized_validator():
     print("=" * 60)
 
     # 初始化数据库
-    db = AsyncDatabase("test_v2.2.db")
+    db = AsyncDatabase("test_v2_2.db")
     await db.init()
 
     # 创建验证器
@@ -245,8 +245,8 @@ async def test_optimized_validator():
 
     # 删除测试数据库
     import os
-    if os.path.exists("test_v2.2.db"):
-        os.remove("test_v2.2.db")
+    if os.path.exists("test_v2_2.db"):
+        os.remove("test_v2_2.db")
 
     print("\n[OK] 优化验证器集成测试通过")
 

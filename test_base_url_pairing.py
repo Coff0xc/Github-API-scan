@@ -19,7 +19,7 @@ from database import KeyStatus, Database
 
 
 @dataclass
-class TestCase:
+class PairCase:
     """测试用例"""
     name: str
     platform: str
@@ -31,7 +31,7 @@ class TestCase:
 
 # 测试用例集合
 TEST_CASES = [
-    TestCase(
+    PairCase(
         name="官方 OpenAI - 默认 URL",
         platform="openai",
         api_key="sk-test1234567890abcdefghijklmnop",  # 测试密钥
@@ -39,7 +39,7 @@ TEST_CASES = [
         expected_status=KeyStatus.INVALID,
         description="测试空 base_url 时是否正确使用默认官方 URL"
     ),
-    TestCase(
+    PairCase(
         name="中转站 OpenAI - 自定义 URL",
         platform="openai",
         api_key="sk-relay1234567890abcdefghijklmnop",
@@ -47,7 +47,7 @@ TEST_CASES = [
         expected_status=KeyStatus.INVALID,  # 测试密钥预期失败，但应该尝试连接到中转站
         description="测试是否使用自定义中转站 base_url"
     ),
-    TestCase(
+    PairCase(
         name="OpenRouter - 聚合服务",
         platform="openai",
         api_key="sk-or-v1-abcd1234567890efgh",
@@ -55,7 +55,7 @@ TEST_CASES = [
         expected_status=KeyStatus.INVALID,
         description="测试 OpenRouter 聚合服务的 base_url 配对"
     ),
-    TestCase(
+    PairCase(
         name="Gemini - 官方 URL",
         platform="gemini",
         api_key="AIzaSyTest1234567890abcdefg",
@@ -63,7 +63,7 @@ TEST_CASES = [
         expected_status=KeyStatus.INVALID,
         description="测试 Gemini 默认 URL"
     ),
-    TestCase(
+    PairCase(
         name="Gemini - 自定义代理",
         platform="gemini",
         api_key="AIzaSyTest1234567890abcdefg",
@@ -71,7 +71,7 @@ TEST_CASES = [
         expected_status=KeyStatus.INVALID,
         description="测试 Gemini 自定义代理 URL"
     ),
-    TestCase(
+    PairCase(
         name="Azure OpenAI - 必需 endpoint",
         platform="azure",
         api_key="abc123def456789012345678901234ab",
@@ -79,7 +79,7 @@ TEST_CASES = [
         expected_status=KeyStatus.INVALID,
         description="测试 Azure endpoint 必需性"
     ),
-    TestCase(
+    PairCase(
         name="Azure OpenAI - 缺失 endpoint",
         platform="azure",
         api_key="abc123def456789012345678901234ab",

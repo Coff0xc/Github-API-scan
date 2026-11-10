@@ -49,3 +49,7 @@ cryptography==42.0.8
 # ========== Web Dashboard 依赖 ==========
 Flask==3.0.3
 flask-cors==4.0.1
+
+# ========== 开发/测试依赖（运行扫描不需要）==========
+# pytest>=8.0
+# pytest-asyncio>=0.23  (pytest.ini 已配置 asyncio_mode = auto)
