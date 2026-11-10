@@ -45,19 +45,9 @@ class LeakedKey:
     - status: 验证状态
     - model_tier: 模型阶梯 (GPT-4/GPT-3.5)
     - rpm: 速率限制
-    - is_high_value: 是否高价值 Key
 
-    深度验证字段（P4）：
-    - balance_usd: 余额（美元）
-    - used_quota_usd: 已用额度
-    - total_quota_usd: 总额度
-    - tpm: Tokens per minute
-    - rpd: Requests per day
-    - has_gpt4, has_gpt5, has_claude_opus: 模型访问权限
-    - organization, account_name: 账户信息
-    - expiration_date: 到期时间
-    - key_type: 密钥类型
-    - value_score: 价值评分 (0-100)
+    兼容字段：balance、is_high_value、balance_usd、value_score 等为旧调用
+    保留，验证回写只更新 status / model_tier / rpm，不再写入数据库。
     """
     platform: str           # openai, azure, gemini, anthropic
     api_key: str            # API Key
@@ -67,10 +57,10 @@ class LeakedKey:
     source_url: str = ""    # GitHub 来源链接
     model_tier: str = ""    # 模型阶梯: GPT-4, GPT-3.5, Gemini-Pro 等
     rpm: int = 0            # Rate Per Minute
-    is_high_value: bool = False  # 是否高价值 Key
+    is_high_value: bool = False  # 已废弃：旧调用兼容，不再保存
 
     # 深度验证字段
-    balance_usd: float = 0.0      # 余额（USD）
+    balance_usd: float = 0.0      # 已废弃：旧调用兼容，不再保存
     used_quota_usd: float = 0.0   # 已用额度
     total_quota_usd: float = 0.0  # 总额度
     tpm: int = 0                  # Tokens per minute
@@ -82,7 +72,7 @@ class LeakedKey:
     account_name: str = ""        # 账户名称
     expiration_date: str = ""     # 到期日期
     key_type: str = ""            # 密钥类型: project/service_account/user
-    value_score: int = 0          # 价值评分 0-100
+    value_score: int = 0          # 已废弃：旧调用兼容，不再保存
 
     found_time: datetime = None
     id: int = None
