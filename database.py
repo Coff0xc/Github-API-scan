@@ -95,17 +95,29 @@ class Database:
     def __init__(self, db_path: str = "leaked_keys.db"):
         self.db_path = db_path
         self._lock = threading.Lock()
+        # :memory: 库必须共享同一连接：sqlite 的每个新连接都是独立的空内存库
+        self._memory_conn = None
+        if db_path == ":memory:":
+            self._memory_conn = self._new_connection(db_path)
         self._init_db()
-    
-    @contextmanager
-    def _get_connection(self):
-        """获取数据库连接的上下文管理器"""
-        conn = sqlite3.connect(self.db_path, check_same_thread=False)
+
+    @staticmethod
+    def _new_connection(db_path: str) -> sqlite3.Connection:
+        conn = sqlite3.connect(db_path, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         # 启用 WAL 模式 - 提升并发读写性能
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
         conn.execute("PRAGMA cache_size=-64000")  # 64MB 缓存
+        return conn
+
+    @contextmanager
+    def _get_connection(self):
+        """获取数据库连接的上下文管理器"""
+        if self._memory_conn is not None:
+            yield self._memory_conn
+            return
+        conn = self._new_connection(self.db_path)
         try:
             yield conn
         finally:
