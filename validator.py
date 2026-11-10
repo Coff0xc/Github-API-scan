@@ -1688,16 +1688,10 @@ def start_validators(
 # ============================================================================
 
 # 导出优化版验证器（使用连接池和智能重试）
-try:
-    from validator_optimized import OptimizedAsyncValidator
-    __all__ = ['AsyncValidator', 'OptimizedAsyncValidator', 'start_validators', 'validate_key_async',
-               'ValidationResult', 'CircuitBreaker', 'circuit_breaker', 'mask_key',
-               'MAX_CONCURRENCY', 'REQUEST_TIMEOUT',
-               'RPM_ENTERPRISE_THRESHOLD', 'RPM_FREE_TRIAL_THRESHOLD']
-except ImportError:
-    # 如果优化模块不可用，只导出原版
-    __all__ = ['AsyncValidator', 'start_validators', 'validate_key_async', 'ValidationResult',
-               'CircuitBreaker', 'circuit_breaker', 'mask_key',
-               'MAX_CONCURRENCY', 'REQUEST_TIMEOUT',
-               'RPM_ENTERPRISE_THRESHOLD', 'RPM_FREE_TRIAL_THRESHOLD']
-    logger.warning("v2.1 优化模块不可用，使用原版验证器")
+# 不提供 OptimizedAsyncValidator 的再导出：使用方都从 validator_optimized
+# 直接导入。底部再做一次反向导入会造成循环导入（预初始化模块），
+# 并在特定导入顺序下误报「v2.1 优化模块不可用」。
+__all__ = ['AsyncValidator', 'start_validators', 'validate_key_async', 'ValidationResult',
+           'CircuitBreaker', 'circuit_breaker', 'mask_key',
+           'MAX_CONCURRENCY', 'REQUEST_TIMEOUT',
+           'RPM_ENTERPRISE_THRESHOLD', 'RPM_FREE_TRIAL_THRESHOLD']

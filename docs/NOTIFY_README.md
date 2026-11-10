@@ -50,7 +50,7 @@ python main_v2.2.py --set-disposition <64-hex-fingerprint> rotated
 
 ## Where to hook it
 
-The scan calls `disclose_finding` in `notify_integration.py` after validation. That is the path to extend. `notify_key_found` and `patch_validator_for_notifications` are older helpers. They still end in a masked send, but they are not what `main_v2.2.py` uses, and the snippets that pass a balance or `is_high_value` do not change the text that leaves the machine.
+The scan calls `disclose_finding` in `notify_integration.py` after validation. That is the only path, and the only thing to extend.
 
 ## Setting up a webhook
 
