@@ -39,9 +39,6 @@ MAX_CONCURRENCY = config.validator_max_concurrency
 # 请求超时（可通过 config.yaml validator.request_timeout 调整）
 REQUEST_TIMEOUT = ClientTimeout(total=config.request_timeout, connect=10)
 
-# 高价值模型列表
-HIGH_VALUE_MODELS = ['gpt-4', 'gpt-4-turbo', 'gpt-4o', 'gpt-4-32k', 'claude-3-opus']
-
 # RPM 阈值分级
 RPM_ENTERPRISE_THRESHOLD = 3000   # >= 3000 为企业级
 RPM_FREE_TRIAL_THRESHOLD = 20     # <= 20 为免费试用
@@ -732,99 +729,6 @@ class AsyncValidator:
             return ValidationResult(KeyStatus.CONNECTION_ERROR, "Azure超时")
         except Exception as e:
             return ValidationResult(KeyStatus.INVALID, str(e)[:20])
-    
-    async def probe_gpt4(self, api_key: str, base_url: str) -> bool:
-        """探测是否支持 GPT-4"""
-        if not base_url:
-            base_url = config.default_base_urls["openai"]
-        
-        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-        body = {"model": "gpt-4", "messages": [{"role": "user", "content": "1"}], "max_tokens": 1}
-        
-        session = await self._get_session()
-        proxy = self._get_proxy()
-        
-        for url in self._try_url_variants(base_url, "chat/completions"):
-            try:
-                async with session.post(url, headers=headers, json=body, proxy=proxy) as resp:
-                    return resp.status == 200
-            except Exception as e:
-                logger.debug(f"验证异常: {type(e).__name__}: {e}")
-                continue
-        return False
-
-    async def probe_quota_by_request(self, api_key: str, base_url: str) -> dict:
-        """
-        通过实际请求测试额度
-        
-        这是最准确的方法：尝试发送一个最小请求
-        
-        返回:
-            {
-                'has_quota': bool,     # 是否有额度
-                'error_type': str,     # 错误类型 (quota/rate_limit/auth/other)
-                'message': str         # 详细信息
-            }
-        """
-        if not base_url:
-            base_url = config.default_base_urls["openai"]
-        
-        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-        session = await self._get_session()
-        proxy = self._get_proxy()
-        
-        # 最小化请求：1 token
-        chat_body = {
-            "model": "gpt-3.5-turbo",
-            "messages": [{"role": "user", "content": "1"}],
-            "max_tokens": 1
-        }
-        
-        for url in self._try_url_variants(base_url, "chat/completions"):
-            try:
-                async with session.post(url, headers=headers, json=chat_body, proxy=proxy) as resp:
-                    response_text = await resp.text()
-                    
-                    if resp.status == 200:
-                        return {'has_quota': True, 'error_type': None, 'message': '有额度'}
-                    
-                    elif resp.status == 429:
-                        # 区分配额耗尽 vs 速率限制
-                        if 'quota' in response_text.lower() or 'exceeded' in response_text.lower():
-                            return {'has_quota': False, 'error_type': 'quota', 'message': '配额耗尽'}
-                        elif 'rate' in response_text.lower():
-                            # 速率限制说明 Key 有效，只是请求太快
-                            return {'has_quota': True, 'error_type': 'rate_limit', 'message': '速率限制(有额度)'}
-                        else:
-                            return {'has_quota': False, 'error_type': 'quota', 'message': '429错误'}
-                    
-                    elif resp.status == 401:
-                        return {'has_quota': False, 'error_type': 'auth', 'message': '认证失败'}
-                    
-                    elif resp.status == 402:
-                        # Payment Required - 明确表示没钱
-                        return {'has_quota': False, 'error_type': 'quota', 'message': '需要付款'}
-                    
-                    elif resp.status == 400:
-                        # 检查是否为余额不足
-                        if 'insufficient' in response_text.lower() or 'quota' in response_text.lower():
-                            return {'has_quota': False, 'error_type': 'quota', 'message': '余额不足'}
-                        # 其他 400 错误可能是请求格式问题，Key 可能有效
-                        return {'has_quota': True, 'error_type': 'other', 'message': '请求错误'}
-                    
-                    else:
-                        return {'has_quota': False, 'error_type': 'other', 'message': f'HTTP {resp.status}'}
-                        
-            except asyncio.TimeoutError:
-                continue
-            except aiohttp.ClientConnectorError:
-                return {'has_quota': False, 'error_type': 'connection', 'message': '连接失败'}
-            except Exception as e:
-                logger.debug(f"验证异常: {type(e).__name__}: {e}")
-                continue
-        
-        return {'has_quota': False, 'error_type': 'other', 'message': '无法验证'}
-    
 
     # ========================================================================
     #                           新增平台验证方法
@@ -1746,12 +1650,12 @@ try:
     from validator_optimized import OptimizedAsyncValidator
     __all__ = ['AsyncValidator', 'OptimizedAsyncValidator', 'start_validators',
                'ValidationResult', 'CircuitBreaker', 'circuit_breaker', 'mask_key',
-               'MAX_CONCURRENCY', 'REQUEST_TIMEOUT', 'HIGH_VALUE_MODELS',
+               'MAX_CONCURRENCY', 'REQUEST_TIMEOUT',
                'RPM_ENTERPRISE_THRESHOLD', 'RPM_FREE_TRIAL_THRESHOLD']
 except ImportError:
     # 如果优化模块不可用，只导出原版
     __all__ = ['AsyncValidator', 'start_validators', 'ValidationResult',
                'CircuitBreaker', 'circuit_breaker', 'mask_key',
-               'MAX_CONCURRENCY', 'REQUEST_TIMEOUT', 'HIGH_VALUE_MODELS',
+               'MAX_CONCURRENCY', 'REQUEST_TIMEOUT',
                'RPM_ENTERPRISE_THRESHOLD', 'RPM_FREE_TRIAL_THRESHOLD']
     logger.warning("v2.1 优化模块不可用，使用原版验证器")

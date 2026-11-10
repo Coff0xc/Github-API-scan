@@ -17,8 +17,6 @@ def test_process_result_does_not_score_or_store_value():
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as root:
             db = Database(os.path.join(root, "keys.db"))
             validator = AsyncValidator(db)
-            validator.probe_gpt4 = _fail("probe_gpt4")
-            validator.probe_quota_by_request = _fail("probe_quota")
 
             async def fake_validate(_result):
                 return ValidationResult(
@@ -45,7 +43,8 @@ def test_process_result_does_not_score_or_store_value():
             assert row == ("valid", "GPT-4", 8000)
             for retired in ("is_high_value", "balance", "balance_usd", "value_score"):
                 assert retired not in columns
-            assert not hasattr(AsyncValidator, "probe_billing")
+            for name in ("probe_billing", "probe_gpt4", "probe_quota_by_request"):
+                assert not hasattr(AsyncValidator, name)
 
     asyncio.run(run())
 
@@ -65,6 +64,9 @@ def test_platform_checks_do_not_flag_high_value():
     assert "is_high_value=True" not in source
     assert "is_high_value=balance" not in source
     assert "def probe_billing" not in source
+    assert "def probe_gpt4" not in source
+    assert "def probe_quota_by_request" not in source
+    assert "HIGH_VALUE_MODELS" not in source
 
 
 if __name__ == "__main__":
