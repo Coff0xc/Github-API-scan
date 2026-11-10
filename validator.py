@@ -1342,6 +1342,11 @@ class AsyncValidator:
         """验证单个结果（统一入口）"""
         platform = result.platform.lower()
 
+        # SSRF 防护：非空自定义 base_url 必须是公网地址。
+        # 各平台方法内部会为空 base_url 替换官方默认地址，那只走下方分支。
+        if result.base_url and not self._is_likely_valid_relay(result.base_url):
+            return ValidationResult(KeyStatus.INVALID, "base_url 无效")
+
         # 主流 AI 平台
         if platform == "azure" or result.is_azure:
             return await self.validate_azure(result.api_key, result.base_url)

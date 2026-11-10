@@ -1,14 +1,21 @@
-"""validate_key_async 分发原语的回归测试。
+"""validate_key_async 分发原语 + SSRF 防护的回归测试。
 
 背景：validator_optimized 的验证 worker 对非 openai/relay 平台调用
 validator.validate_key_async，但该函数自 edf3439 起从未真正存在，
 远程扫描的非 openai 平台验证一启动就 ImportError。
 
-全部用 mock 或 loopback 死端口，不进真实网络。
+SSRF 部分：validate_single 现在对一切非空自定义 base_url 做防护
+（此前只有 validate_openai 检查，其余 30 个平台方法会被恶意仓库
+诱导去探测内网）。
+
+全部用 mock 或 loopback 死端口，不打真实网络。
 """
 
 from validator import AsyncValidator, CircuitBreaker, ValidationResult, validate_key_async
 from database import KeyStatus
+
+# 公网字面量 IP，https scheme，过 SSRF 防护且无需 DNS
+PUBLIC_URL = "https://93.184.216.34/v1"
 
 
 async def test_dispatch_routes_to_platform_method(monkeypatch):
@@ -21,9 +28,9 @@ async def test_dispatch_routes_to_platform_method(monkeypatch):
 
     monkeypatch.setattr(AsyncValidator, "validate_gemini", fake_gemini)
 
-    status, balance, tier, rpm, high = await validate_key_async("gemini", "k1", "u1")
+    status, balance, tier, rpm, high = await validate_key_async("gemini", "k1", PUBLIC_URL)
 
-    assert calls == [("k1", "u1")]
+    assert calls == [("k1", PUBLIC_URL)]
     assert status == KeyStatus.VALID
     assert tier == "Gemini-Pro"
     assert rpm == 1000
@@ -47,23 +54,35 @@ async def test_azure_flag_set_for_azure_platform(monkeypatch):
 
 
 async def test_unknown_platform_falls_back_to_openai(monkeypatch):
-    """未知平台回落 OpenAI 兼容验证（SSRF 拒绝的内网地址应快速返回 INVALID）。"""
+    """未知平台回落 OpenAI 兼容验证。"""
     calls = []
 
     async def fake_openai(self, api_key, base_url):
         calls.append(base_url)
-        # 模拟 validate_openai 的 SSRF 前置检查
-        from validator import ValidationResult
-        if not self._is_likely_valid_relay(base_url):
-            return ValidationResult(KeyStatus.INVALID, "base_url 无效")
-        return ValidationResult(KeyStatus.CONNECTION_ERROR, "refused")
+        return ValidationResult(KeyStatus.INVALID, "auth failed")
 
     monkeypatch.setattr(AsyncValidator, "validate_openai", fake_openai)
 
-    status, *_ = await validate_key_async("future_platform", "sk-x", "http://192.168.1.1/v1")
+    status, *_ = await validate_key_async("future_platform", "sk-x", PUBLIC_URL)
 
-    assert calls == ["http://192.168.1.1/v1"]
+    assert calls == [PUBLIC_URL]
     assert status == KeyStatus.INVALID
+
+
+async def test_ssrf_guard_blocks_private_url_before_dispatch(monkeypatch):
+    """非 openai 平台的内网 base_url 必须在分发前被 SSRF 防护拦下。"""
+    called = []
+
+    async def fake_gemini(self, api_key, base_url):
+        called.append(base_url)
+        return ValidationResult(KeyStatus.VALID, "ok")
+
+    monkeypatch.setattr(AsyncValidator, "validate_gemini", fake_gemini)
+
+    status, *_ = await validate_key_async("gemini", "k", "http://192.168.1.1/v1")
+
+    assert status == KeyStatus.INVALID
+    assert called == []
 
 
 async def test_loopback_dead_port_returns_connection_error():
@@ -82,6 +101,6 @@ async def test_accepts_caller_circuit_breaker(monkeypatch):
     monkeypatch.setattr(AsyncValidator, "validate_openai", fake_openai)
 
     status, *_ = await validate_key_async(
-        "other", "sk-y", "http://192.168.1.1/v1", circuit_breaker=breaker
+        "other", "sk-y", PUBLIC_URL, circuit_breaker=breaker
     )
     assert status == KeyStatus.INVALID
