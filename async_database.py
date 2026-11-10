@@ -152,6 +152,14 @@ class AsyncDatabase:
             if len(self._write_queue) >= self._batch_size:
                 asyncio.create_task(self._flush_queue())
 
+    async def flush(self):
+        """立即落盘待写入队列。
+
+        验证管线在 update_key_status 前先调用本方法，否则行还没写入、
+        状态更新会命中 0 行被静默丢弃。
+        """
+        await self._flush_queue()
+
     async def key_exists(self, api_key: str) -> bool:
         """检查 Key 是否存在（按 key_hash 指纹查询）"""
         async with aiosqlite.connect(self.db_path) as db:

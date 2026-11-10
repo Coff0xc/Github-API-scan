@@ -586,6 +586,9 @@ async def optimized_validator_worker(
                     base_url=result.base_url,
                     source_url=getattr(result, "source_url", ""),
                 ))
+                # 立即落盘：否则验证耗时短于 flush 间隔时，下面的
+                # update_key_status 会命中 0 行，状态被静默丢弃。
+                await async_db.flush()
 
                 # 分发验证
                 if platform in ("openai", "relay"):

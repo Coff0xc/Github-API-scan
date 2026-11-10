@@ -1492,6 +1492,43 @@ class AsyncValidator:
 
 
 # ============================================================================
+#                          平台分发原语（供 validator_optimized 使用）
+# ============================================================================
+
+async def validate_key_async(
+    platform: str,
+    api_key: str,
+    base_url: str = "",
+    circuit_breaker: Optional[CircuitBreaker] = None,
+) -> Tuple[KeyStatus, str, str, int, bool]:
+    """
+    按平台分发验证，返回 (status, balance, model_tier, rpm, is_high_value)。
+
+    validator_optimized 的验证 worker 对非 openai/relay 平台调用本函数；
+    openai/relay 走 OptimizedAsyncValidator 的缓存路径，不经这里。
+    每次调用使用独立的临时验证器，session 用毕即关，不做跨调用缓存。
+    """
+    from scanner import ScanResult
+
+    platform = (platform or "openai").lower()
+    validator = AsyncValidator(Database(":memory:"))
+    if circuit_breaker is not None:
+        validator._circuit_breaker = circuit_breaker
+    try:
+        result = await validator.validate_single(ScanResult(
+            platform=platform,
+            api_key=api_key,
+            base_url=base_url or "",
+            source_url="",
+            is_azure=(platform == "azure"),
+            is_relay=bool(base_url),
+        ))
+        return result.status, "", result.model_tier or "", result.rpm or 0, False
+    finally:
+        await validator.close()
+
+
+# ============================================================================
 #                              辅助函数
 # ============================================================================
 
@@ -1648,13 +1685,13 @@ def start_validators(
 # 导出优化版验证器（使用连接池和智能重试）
 try:
     from validator_optimized import OptimizedAsyncValidator
-    __all__ = ['AsyncValidator', 'OptimizedAsyncValidator', 'start_validators',
+    __all__ = ['AsyncValidator', 'OptimizedAsyncValidator', 'start_validators', 'validate_key_async',
                'ValidationResult', 'CircuitBreaker', 'circuit_breaker', 'mask_key',
                'MAX_CONCURRENCY', 'REQUEST_TIMEOUT',
                'RPM_ENTERPRISE_THRESHOLD', 'RPM_FREE_TRIAL_THRESHOLD']
 except ImportError:
     # 如果优化模块不可用，只导出原版
-    __all__ = ['AsyncValidator', 'start_validators', 'ValidationResult',
+    __all__ = ['AsyncValidator', 'start_validators', 'validate_key_async', 'ValidationResult',
                'CircuitBreaker', 'circuit_breaker', 'mask_key',
                'MAX_CONCURRENCY', 'REQUEST_TIMEOUT',
                'RPM_ENTERPRISE_THRESHOLD', 'RPM_FREE_TRIAL_THRESHOLD']

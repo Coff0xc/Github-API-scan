@@ -69,7 +69,46 @@ def test_platform_checks_do_not_flag_high_value():
     assert "HIGH_VALUE_MODELS" not in source
 
 
+def test_queued_insert_must_flush_before_status_update():
+    """queue_insert 只是入队，必须先 flush 落盘再 update_key_status。
+
+    验证 worker 的回归：不 flush 直接 update 会命中 0 行，状态静默丢失，
+    数据库里永远只剩 pending。
+    """
+    from async_database import AsyncDatabase
+
+    async def run():
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as root:
+            path = os.path.join(root, "keys.db")
+            db = AsyncDatabase(path)
+            await db.init()
+            await db.queue_insert(_leaked_key("gemini", KEY))
+            await db.flush()
+            await db.update_key_status(KEY, KeyStatus.CONNECTION_ERROR, "", "", 0, False)
+            await db.close()
+            with sqlite3.connect(path) as conn:
+                row = conn.execute("SELECT status FROM leaked_keys").fetchone()
+            assert row == ("connection_error",)
+
+    asyncio.run(run())
+
+
+def _leaked_key(platform, api_key):
+    from database import LeakedKey
+    from datetime import datetime
+
+    return LeakedKey(
+        platform=platform,
+        api_key=api_key,
+        base_url="http://127.0.0.1:1/v1",
+        status=KeyStatus.PENDING.value,
+        source_url="https://github.com/acme-labs/app/blob/abc/.env",
+        found_time=datetime.now(),
+    )
+
+
 if __name__ == "__main__":
     test_process_result_does_not_score_or_store_value()
     test_platform_checks_do_not_flag_high_value()
+    test_queued_insert_must_flush_before_status_update()
     print("process result ok")
