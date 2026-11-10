@@ -13,6 +13,8 @@ import asyncio
 import time
 from datetime import datetime
 
+import pytest
+
 from database import LeakedKey, KeyStatus
 from async_database import AsyncDatabase
 from cache_manager import CacheManager, CacheConfig, DomainHealth
@@ -173,8 +175,12 @@ async def test_batch_validator():
 #                          测试 3: 优化验证器集成
 # ============================================================================
 
+@pytest.mark.network
 async def test_optimized_validator():
-    """测试优化验证器（集成缓存和批量验证）"""
+    """测试优化验证器（集成缓存和批量验证）
+
+    会向 api.openai.com 发真实请求，标记为 network，默认套件不运行。
+    """
     print("\n" + "=" * 60)
     print("测试 3: 优化验证器集成")
     print("=" * 60)

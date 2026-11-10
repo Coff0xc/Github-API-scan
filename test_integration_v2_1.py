@@ -13,6 +13,8 @@ import asyncio
 import time
 from datetime import datetime
 
+import pytest
+
 from database import LeakedKey, KeyStatus
 from async_database import AsyncDatabase
 from connection_pool import get_connection_pool, close_connection_pool
@@ -24,8 +26,12 @@ from validator_optimized import OptimizedAsyncValidator
 from loguru import logger
 
 
+@pytest.mark.network
 async def test_full_integration():
-    """完整集成测试"""
+    """完整集成测试
+
+    会向 api.openai.com 并发发 50 个真实请求，标记为 network，默认套件不运行。
+    """
     print("\n" + "=" * 60)
     print("v2.1 完整集成测试")
     print("=" * 60)
