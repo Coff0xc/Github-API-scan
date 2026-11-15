@@ -10,18 +10,18 @@ v2.2 新特性：
 v2.1 优化（保留）：
 1. 连接池管理 - 复用 HTTP 连接
 2. 智能重试机制 - 指数退避
-3. 动态队列管理 - 根据内存压力自动调整
-4. 性能监控系统 - 实时延迟和吞吐量统计
+3. 性能监控系统 - 实时延迟和吞吐量统计
 
 基于 v2.0 优化：
 - 异步数据库 (AsyncDatabase) - 性能提升 3-5倍
-- asyncio.Queue 替代 queue.Queue - 消除阻塞
+- 扫描线程用 queue.Queue.put(timeout=)，验证协程用 take_queued_result
 - 配置验证 - 启动时检查
 """
 
 import sys
 import signal
 import asyncio
+import queue
 import threading
 import time
 import argparse
@@ -41,7 +41,6 @@ from source_realtime import start_realtime_scanner
 # v2.1 优化模块
 from performance_monitor import get_monitor
 from connection_pool import get_connection_pool, close_connection_pool
-from queue_manager import create_queue
 
 # v2.2 新增模块
 from cache_manager import get_cache_manager, close_cache_manager, CacheConfig
@@ -99,9 +98,8 @@ class OptimizedSecretScannerV22:
         self.target_org = target_org
         self.target_repo = target_repo
 
-        # 使用动态队列（v2.1）
-        self.result_queue = None  # 将在 start() 中初始化
-        self.use_dynamic_queue = True
+        # 扫描线程 put(timeout=)，验证协程 take_queued_result；与 --scan-local 同一队列类型
+        self.result_queue = queue.Queue(maxsize=10000)
 
         self.async_db: Optional[AsyncDatabase] = None
         self.dashboard = Dashboard()
@@ -163,18 +161,6 @@ class OptimizedSecretScannerV22:
             self.performance_monitor = get_monitor()
             await self.performance_monitor.start()
             logger.info("性能监控已启动")
-
-        # 初始化动态队列（v2.1）
-        if self.use_dynamic_queue:
-            self.result_queue = create_queue(
-                initial_size=1000,
-                auto_adjust=True,
-                memory_threshold=80.0
-            )
-            await self.result_queue.start()
-            logger.info("动态队列已启动 (初始大小: 1000)")
-        else:
-            self.result_queue = asyncio.Queue(maxsize=10000)
 
     def start(self):
         """启动扫描系统"""
@@ -272,13 +258,7 @@ class OptimizedSecretScannerV22:
         with self.dashboard.start():
             try:
                 while not self.stop_event.is_set():
-                    # 更新队列大小
-                    if self.use_dynamic_queue:
-                        queue_size = self.result_queue.qsize()
-                    else:
-                        queue_size = self.result_queue.qsize()
-
-                    self.dashboard.update_stats(queue_size=queue_size)
+                    self.dashboard.update_stats(queue_size=self.result_queue.qsize())
 
                     # v2.1: 更新性能监控统计
                     if self.performance_monitor:
@@ -344,11 +324,6 @@ class OptimizedSecretScannerV22:
                 logger.info("=" * 60)
                 self.performance_monitor.print_report()
                 await self.performance_monitor.stop()
-
-            # 关闭动态队列
-            if self.use_dynamic_queue and self.result_queue:
-                await self.result_queue.stop()
-                logger.info("动态队列已关闭")
 
             # v2.2: 关闭缓存管理器
             if self.enable_cache:
@@ -437,7 +412,6 @@ v2.2 新特性:
 v2.1 优化（保留）:
   - 连接池管理: 复用 HTTP 连接，减少开销
   - 智能重试: 指数退避，提高成功率
-  - 动态队列: 根据内存压力自动调整
   - 性能监控: 实时延迟和吞吐量统计
         """
     )
@@ -455,7 +429,8 @@ v2.1 优化（保留）:
 
     # v2.1 优化选项
     parser.add_argument('--no-monitor', action='store_true', help='禁用性能监控')
-    parser.add_argument('--no-dynamic-queue', action='store_true', help='禁用动态队列')
+    parser.add_argument('--no-dynamic-queue', action='store_true',
+                        help='已忽略：扫描结果队列固定为线程安全 queue.Queue')
 
     # v2.2 新增选项
     parser.add_argument('--no-cache', action='store_true', help='禁用智能缓存')
@@ -590,11 +565,6 @@ v2.1 优化（保留）:
         target_org=getattr(args, "target_org", "") or "",
         target_repo=getattr(args, "target_repo", "") or ""
     )
-
-    # 应用动态队列设置
-    if args.no_dynamic_queue:
-        scanner.use_dynamic_queue = False
-        logger.info("动态队列已禁用")
 
     scanner.start()
     print(write_findings(config.db_path, args.findings_json or "findings.json"))

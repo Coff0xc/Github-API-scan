@@ -361,7 +361,7 @@ Text and CSV are shortened. `--reveal` writes full keys into an export. Do not c
 | `--pastebin-key KEY` | Pastebin Pro key, only if Pastebin is enabled. |
 | `--no-cache` | Do not reuse earlier check results for this run. |
 | `--no-monitor` | Skip the performance monitor. |
-| `--no-dynamic-queue` | Keep the queue size fixed. |
+| `--no-dynamic-queue` | Ignored. Scan results always go through a thread-safe `queue.Queue`. |
 
 </details>
 
