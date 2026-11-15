@@ -77,7 +77,6 @@
 
 **Retained from v2.2:**
 - 3-layer smart cache (30-50% hit rate)
-- Batch validation (40-60% fewer requests)
 - HTTP connection pool (70-80% overhead reduction)
 - Smart retry mechanism (15-25% success boost)
 - Dynamic queue management (30-50% memory reduction)

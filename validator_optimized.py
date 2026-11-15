@@ -3,8 +3,7 @@
 
 v2.2 新增优化：
 1. 智能缓存系统 - 3层缓存架构，减少重复验证
-2. 批量验证支持 - 按域名分组，降低网络开销
-3. 域名健康度追踪 - 避免验证死域名
+2. 域名健康度追踪 - 避免验证死域名
 
 v2.1 优化（保留）：
 1. 连接池管理 - 复用 HTTP 连接
@@ -37,9 +36,7 @@ from utils import relay_url_is_allowed
 from connection_pool import get_connection_pool
 from retry_handler import RetryHandler, RetryConfig, ErrorType
 
-# v2.2: 缓存和批量验证
 from cache_manager import CacheManager, CacheConfig, get_cache_manager
-from batch_validator import BatchValidator, BatchConfig
 
 # 导入原有的熔断器和工具函数
 from validator import (
@@ -60,7 +57,6 @@ class OptimizedAsyncValidator:
 
     v2.2 新特性：
     - 智能缓存系统（3层缓存架构）
-    - 批量验证支持（按域名分组）
     - 域名健康度追踪
 
     v2.1 特性（保留）：
@@ -70,8 +66,7 @@ class OptimizedAsyncValidator:
     """
 
     def __init__(self, db: Database, dashboard=None,
-                 cache_config: Optional[CacheConfig] = None,
-                 batch_config: Optional[BatchConfig] = None):
+                 cache_config: Optional[CacheConfig] = None):
         self.db = db
         self.dashboard = dashboard
         self.semaphore = asyncio.Semaphore(MAX_CONCURRENCY)
@@ -87,10 +82,8 @@ class OptimizedAsyncValidator:
             jitter=True
         ))
 
-        # v2.2: 缓存管理器和批量验证器
         self._cache_manager: Optional[CacheManager] = None
         self._cache_config = cache_config
-        self._batch_validator = BatchValidator(batch_config)
 
         # 性能统计
         self._stats = {
@@ -99,11 +92,9 @@ class OptimizedAsyncValidator:
             'failed_validations': 0,
             'retried_validations': 0,
             'connection_reused': 0,
-            # v2.2 新增统计
             'cache_hits': 0,
             'cache_misses': 0,
             'dead_domain_skipped': 0,
-            'batch_validations': 0,
         }
 
     async def init_cache(self):
@@ -239,7 +230,6 @@ class OptimizedAsyncValidator:
         v2.2 优化：
         1. 智能缓存 - 检查缓存避免重复验证
         2. 域名健康度 - 跳过死域名
-        3. 批量验证支持
 
         v2.1 优化（保留）：
         1. 使用连接池复用连接
@@ -390,42 +380,6 @@ class OptimizedAsyncValidator:
             await self._cache_manager.record_domain_failure(base_url)
         return ValidationResult(KeyStatus.CONNECTION_ERROR, "连接失败")
 
-    # ========================================================================
-    #                           v2.2: 批量验证方法
-    # ========================================================================
-
-    async def validate_batch(
-        self,
-        keys: list[tuple[str, str]],
-        progress_callback=None
-    ) -> list[ValidationResult]:
-        """
-        批量验证 Key（v2.2 新增）
-
-        按域名分组验证，减少网络开销
-
-        Args:
-            keys: [(api_key, base_url), ...]
-            progress_callback: 进度回调 def(completed, total)
-
-        Returns:
-            [ValidationResult, ...]
-        """
-        self._stats['batch_validations'] += 1
-
-        async def _validate_single(api_key: str, base_url: str):
-            """单个验证的包装函数"""
-            return await self.validate_openai(api_key, base_url)
-
-        # 使用批量验证器
-        results = await self._batch_validator.validate_batch(
-            keys,
-            _validate_single,
-            progress_callback
-        )
-
-        return results
-
     def get_stats(self) -> dict:
         """获取性能统计"""
         stats = self._stats.copy()
@@ -459,10 +413,6 @@ class OptimizedAsyncValidator:
             else:
                 stats['cache_hit_rate'] = 0.0
 
-        # v2.2: 添加批量验证统计
-        batch_stats = self._batch_validator.get_stats()
-        stats['batch'] = batch_stats
-
         return stats
 
 
@@ -487,7 +437,6 @@ async def optimized_validator_worker(
     dashboard=None,
     worker_id: int = 0,
     cache_config: Optional[CacheConfig] = None,
-    batch_config: Optional[BatchConfig] = None,
 ):
     """
     v2.2 优化版验证工作协程
@@ -499,7 +448,7 @@ async def optimized_validator_worker(
     """
     from validator import validate_key_async, CircuitBreaker
 
-    validator = OptimizedAsyncValidator(async_db, dashboard, cache_config, batch_config)
+    validator = OptimizedAsyncValidator(async_db, dashboard, cache_config)
     await validator.init_cache()
     circuit_breaker = CircuitBreaker()
     processed_count = 0
@@ -606,7 +555,6 @@ def start_validators(
     dashboard=None,
     num_workers: int = 2,
     cache_config: Optional[CacheConfig] = None,
-    batch_config: Optional[BatchConfig] = None,
 ):
     """
     启动 v2.2 优化版验证器（每个线程内跑独立事件循环）
@@ -618,7 +566,6 @@ def start_validators(
         dashboard: Dashboard UI 实例
         num_workers: 验证器线程数
         cache_config: v2.2 缓存配置
-        batch_config: v2.2 批量验证配置
 
     Returns:
         List[threading.Thread]
@@ -635,7 +582,7 @@ def start_validators(
                 optimized_validator_worker(
                     result_queue, async_db, stop_event,
                     dashboard=dashboard, worker_id=worker_id,
-                    cache_config=cache_config, batch_config=batch_config
+                    cache_config=cache_config
                 )
             )
         finally:

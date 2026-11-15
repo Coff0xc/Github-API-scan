@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-v2.2 功能测试 - 验证缓存和批量验证
+v2.2 功能测试 - 验证缓存
 
 测试内容：
 1. 缓存管理器 - L1/L2/L3 缓存功能
-2. 批量验证器 - 域名分组和批量处理
-3. 优化验证器 - 集成测试
+2. 优化验证器不带死掉的批量路径
+3. 优化验证器 - 集成测试（network）
 """
 
 import asyncio
@@ -15,10 +15,9 @@ from datetime import datetime
 
 import pytest
 
-from database import LeakedKey, KeyStatus
+from database import Database, LeakedKey, KeyStatus
 from async_database import AsyncDatabase
 from cache_manager import CacheManager, CacheConfig, DomainHealth
-from batch_validator import BatchValidator, BatchConfig
 from validator_optimized import OptimizedAsyncValidator
 
 from loguru import logger
@@ -119,56 +118,14 @@ async def test_cache_manager():
     print("\n[OK] 缓存管理器测试通过")
 
 
-# ============================================================================
-#                          测试 2: 批量验证器
-# ============================================================================
-
-async def test_batch_validator():
-    """测试批量验证器"""
-    print("\n" + "=" * 60)
-    print("测试 2: 批量验证器")
-    print("=" * 60)
-
-    validator = BatchValidator(BatchConfig(
-        batch_size=10,
-        max_concurrent_domains=5
-    ))
-
-    # 生成测试数据（不同域名）
-    keys = [
-        ("sk-test-1", "https://api.openai.com"),
-        ("sk-test-2", "https://api.openai.com"),
-        ("sk-test-3", "https://api.anthropic.com"),
-        ("sk-test-4", "https://api.anthropic.com"),
-        ("sk-test-5", "https://generativelanguage.googleapis.com"),
-    ]
-
-    # 测试域名分组
-    print("\n[分组] 按域名分组测试")
-    grouped = validator.group_by_domain(keys)
-    print(f"  总 Key 数: {len(keys)}")
-    print(f"  分组数: {len(grouped)}")
-    for domain, domain_keys in grouped.items():
-        print(f"  {domain}: {len(domain_keys)} 个 Key")
-
-    # 测试批次创建
-    print("\n[批次] 创建最优批次")
-    large_keys = [(f"sk-test-{i}", f"https://api{i % 3}.example.com") for i in range(25)]
-    batches = validator.create_optimal_batches(large_keys)
-    print(f"  总 Key 数: {len(large_keys)}")
-    print(f"  批次数: {len(batches)}")
-    for i, batch in enumerate(batches):
-        print(f"  批次 {i+1}: {len(batch)} 个 Key")
-
-    # 获取统计
+def test_optimized_validator_has_no_batch_path():
+    """worker 按条 claim→validate→upsert，不走按域名攒批。"""
+    validator = OptimizedAsyncValidator(Database(":memory:"))
+    assert not hasattr(validator, "validate_batch")
+    assert not hasattr(validator, "_batch_validator")
     stats = validator.get_stats()
-    print(f"\n[统计] 批量验证统计:")
-    print(f"  网络请求节省: {stats['network_requests_saved']} 次")
-    print(f"  DNS 查询节省: {stats['dns_queries_saved']} 次")
-    print(f"  请求减少: {stats['request_reduction_percent']:.1f}%")
-    print(f"  DNS 减少: {stats['dns_reduction_percent']:.1f}%")
-
-    print("\n[OK] 批量验证器测试通过")
+    assert "batch" not in stats
+    assert "batch_validations" not in stats
 
 
 # ============================================================================
@@ -177,7 +134,7 @@ async def test_batch_validator():
 
 @pytest.mark.network
 async def test_optimized_validator():
-    """测试优化验证器（集成缓存和批量验证）
+    """测试优化验证器（集成缓存）。
 
     会向 api.openai.com 发真实请求，标记为 network，默认套件不运行。
     """
@@ -194,7 +151,6 @@ async def test_optimized_validator():
         db,
         dashboard=None,
         cache_config=CacheConfig(validation_ttl=60.0),
-        batch_config=BatchConfig(batch_size=10)
     )
     await validator.init_cache()
 
@@ -218,28 +174,12 @@ async def test_optimized_validator():
         speedup = time1 / time2
         print(f"  [OK] 缓存加速: {speedup:.1f}x")
 
-    print("\n[批量验证] 测试批量处理")
-    test_keys = [
-        (f"sk-batch-{i}", "https://api.openai.com")
-        for i in range(5)
-    ]
-
-    start = time.time()
-    results = await validator.validate_batch(test_keys)
-    duration = time.time() - start
-
-    print(f"  批量验证: {len(test_keys)} 个 Key")
-    print(f"  耗时: {duration:.2f}s")
-    print(f"  吞吐量: {len(test_keys)/duration:.1f} ops/s")
-
-    # 获取统计
     stats = validator.get_stats()
     print(f"\n[统计] 验证器统计:")
     print(f"  总验证: {stats['total_validations']}")
     print(f"  缓存命中: {stats['cache_hits']}")
     print(f"  缓存未命中: {stats['cache_misses']}")
     print(f"  死域名跳过: {stats['dead_domain_skipped']}")
-    print(f"  批量验证: {stats['batch_validations']}")
 
     if stats['cache_hits'] + stats['cache_misses'] > 0:
         hit_rate = stats['cache_hits'] / (stats['cache_hits'] + stats['cache_misses']) * 100
@@ -270,11 +210,7 @@ async def main():
     try:
         # 测试 1: 缓存管理器
         await test_cache_manager()
-
-        # 测试 2: 批量验证器
-        await test_batch_validator()
-
-        # 测试 3: 优化验证器集成
+        test_optimized_validator_has_no_batch_path()
         await test_optimized_validator()
 
         print("\n" + "=" * 60)
@@ -285,8 +221,6 @@ async def main():
         print("  [OK] L1 验证结果缓存")
         print("  [OK] L2 域名健康度追踪")
         print("  [OK] L3 Key 指纹去重")
-        print("  [OK] 域名分组批量验证")
-        print("  [OK] 网络请求优化")
         print("  [OK] 缓存集成到验证器")
 
         return 0

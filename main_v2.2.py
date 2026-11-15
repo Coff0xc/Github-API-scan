@@ -5,8 +5,7 @@ GitHub Secret Scanner Pro - v2.2 智能缓存版主程序
 
 v2.2 新特性：
 1. 智能缓存系统 - 3层缓存架构，减少重复验证 30-50%
-2. 批量验证支持 - 按域名分组，降低网络开销 20-30%
-3. 域名健康度追踪 - 避免验证死域名，提升效率
+2. 域名健康度追踪 - 避免验证死域名，提升效率
 
 v2.1 优化（保留）：
 1. 连接池管理 - 复用 HTTP 连接
@@ -46,7 +45,6 @@ from queue_manager import create_queue
 
 # v2.2 新增模块
 from cache_manager import get_cache_manager, close_cache_manager, CacheConfig
-from batch_validator import BatchConfig
 from export_io import decrypt_keys, export_keys, export_keys_csv, export_keys_encrypted
 from findings_feed import apply_dispositions, set_one_disposition, write_findings
 from use_boundary import (
@@ -207,7 +205,7 @@ class OptimizedSecretScannerV22:
             is_running=True
         )
 
-        # 启动验证器（v2.2: 使用优化版验证器，支持缓存与批量验证）
+        # 启动验证器（v2.2: 使用优化版验证器，支持缓存）
         from validator_optimized import start_validators
         self.validator_threads = start_validators(
             self.result_queue,
@@ -215,9 +213,7 @@ class OptimizedSecretScannerV22:
             self.stop_event,
             dashboard=self.dashboard,
             num_workers=config.validator_workers or 2,
-            # v2.2: 传递缓存和批量验证配置
             cache_config=CacheConfig() if self.enable_cache else None,
-            batch_config=BatchConfig()
         )
 
         # 启动 GitHub 扫描器（带授权范围限定）
@@ -436,7 +432,6 @@ def main():
         epilog="""
 v2.2 新特性:
   - 智能缓存: 3层缓存架构，减少重复验证 30-50%
-  - 批量验证: 按域名分组，降低网络开销 20-30%
   - 域名健康度: 避免验证死域名，提升效率
 
 v2.1 优化（保留）:
