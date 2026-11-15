@@ -15,6 +15,7 @@ import sys
 import time
 import queue
 import asyncio
+import inspect
 import threading
 from datetime import datetime, timezone
 from typing import Optional, List, Set, Tuple
@@ -391,6 +392,8 @@ class GitHubScanner:
         self.dashboard = dashboard
         self.target_org = target_org
         self.target_repo = target_repo
+        if inspect.iscoroutinefunction(getattr(db, "key_exists", None)):
+            raise TypeError("GitHubScanner requires database.Database, not AsyncDatabase")
         if target_repo or target_org:
             self._log(f"搜索范围已限定: {'repo:'+target_repo if target_repo else 'org:'+target_org}", "INFO")
         

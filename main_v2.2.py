@@ -101,6 +101,7 @@ class OptimizedSecretScannerV22:
         # 扫描线程 put(timeout=)，验证协程 take_queued_result；与 --scan-local 同一队列类型
         self.result_queue = queue.Queue(maxsize=10000)
 
+        self.db: Optional[Database] = None
         self.async_db: Optional[AsyncDatabase] = None
         self.dashboard = Dashboard()
 
@@ -180,6 +181,9 @@ class OptimizedSecretScannerV22:
         # 尝试启用 uvloop
         try_enable_uvloop()
 
+        # 扫描线程用同步 Database；验证线程用 AsyncDatabase.connect()
+        self.db = Database(config.db_path)
+
         # 初始化异步资源
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -205,7 +209,7 @@ class OptimizedSecretScannerV22:
         # 启动 GitHub 扫描器（带授权范围限定）
         self.scanner_thread = start_scanner(
             self.result_queue,
-            self.async_db,
+            self.db,
             self.stop_event,
             dashboard=self.dashboard,
             target_org=self.target_org,

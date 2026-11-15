@@ -153,6 +153,34 @@ def test_key_patterns_compiled_once_without_azure():
     assert scanner._key_patterns is COMPILED_KEY_PATTERNS
 
 
+def test_github_scanner_requires_sync_database():
+    from async_database import AsyncDatabase
+    from scanner import GitHubScanner
+    import queue
+    import threading
+
+    try:
+        GitHubScanner(queue.Queue(), AsyncDatabase(":memory:"), threading.Event())
+    except TypeError as exc:
+        assert "Database" in str(exc)
+        return
+    raise AssertionError("GitHubScanner must reject AsyncDatabase")
+
+
+def test_github_extract_keeps_new_key_with_sync_database():
+    from scanner import GitHubScanner
+    import queue
+    import threading
+    from database import Database
+
+    key = "sk-proj-Qw9Rt8Yu7Ip6Lk5Jh4Gf3Ds2Az1Xc0Vb"
+    scanner = GitHubScanner(queue.Queue(), Database(":memory:"), threading.Event())
+    found = scanner._extract_keys_from_content(
+        f"API_KEY={key}", "https://github.com/acme/app/blob/main/.env",
+    )
+    assert [item.api_key for item in found] == [key]
+
+
 if __name__ == "__main__":
     test_remote_scope_rules()
     test_search_scope_never_passes_raw_query()
@@ -164,4 +192,6 @@ if __name__ == "__main__":
     test_private_targets_are_blocked()
     test_relay_url_policy_matches_host_rules()
     test_key_patterns_compiled_once_without_azure()
+    test_github_scanner_requires_sync_database()
+    test_github_extract_keeps_new_key_with_sync_database()
     print("boundary fixes ok")

@@ -33,10 +33,12 @@ def _item():
 def test_remote_main_uses_sync_queue():
     path = os.path.join(os.path.dirname(__file__), "main_v2.2.py")
     with open(path, encoding="utf-8") as handle:
-        source = handle.read()
+        source = handle.read().replace("\r\n", "\n")
     assert "queue.Queue(maxsize=10000)" in source
     assert "from queue_manager import create_queue" not in source
     assert "asyncio.Queue(maxsize=10000)" not in source
+    assert "self.db = Database(config.db_path)" in source
+    assert "start_scanner(\n            self.result_queue,\n            self.db," in source
     main = _load_main()
     scanner = main.OptimizedSecretScannerV22(target_org="example")
     assert isinstance(scanner.result_queue, queue.Queue)
