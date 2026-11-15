@@ -53,7 +53,7 @@ async def test_cache_manager():
     # 设置缓存
     await cache.set_validation_result(api_key, base_url, {
         'status': 'valid',
-        'balance': '100 models',
+        'info': '3模型',
         'model_tier': 'GPT-4',
         'rpm': 10000
     })
@@ -63,6 +63,8 @@ async def test_cache_manager():
     result = await cache.get_validation_result(api_key, base_url)
     assert result is not None, "第二次获取应该命中缓存"
     assert result['status'] == 'valid'
+    assert result['info'] == '3模型'
+    assert 'balance' not in result
     print("  [OK] 缓存命中")
 
     # 测试 L2: 域名健康度缓存
@@ -126,6 +128,32 @@ def test_optimized_validator_has_no_batch_path():
     stats = validator.get_stats()
     assert "batch" not in stats
     assert "batch_validations" not in stats
+
+
+async def test_openai_cache_hit_uses_info_not_balance():
+    class FakeCache:
+        async def get_validation_result(self, api_key, base_url):
+            return {
+                "status": "valid",
+                "info": "3模型",
+                "model_tier": "GPT-4",
+                "rpm": 8000,
+                "balance": "should-be-ignored",
+            }
+
+        async def is_domain_dead(self, base_url):
+            raise AssertionError("cache hit must not check domain")
+
+    validator = OptimizedAsyncValidator(Database(":memory:"))
+    validator._cache_manager = FakeCache()
+    result = await validator.validate_openai(
+        "sk-test-cache", "https://93.184.216.34/v1",
+    )
+    assert result.status == KeyStatus.VALID
+    assert result.info == "3模型"
+    assert result.model_tier == "GPT-4"
+    assert result.rpm == 8000
+    assert validator._stats["cache_hits"] == 1
 
 
 # ============================================================================

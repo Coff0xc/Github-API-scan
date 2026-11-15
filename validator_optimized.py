@@ -257,7 +257,7 @@ class OptimizedAsyncValidator:
                 self._log(f"缓存命中: {mask_key(api_key)}", "DEBUG")
                 return ValidationResult(
                     KeyStatus(cached_result['status']),
-                    cached_result.get('info') or cached_result.get('balance', ''),
+                    cached_result.get('info', ''),
                     cached_result.get('model_tier') or "",
                     cached_result.get('rpm', 0),
                 )
@@ -465,8 +465,7 @@ async def optimized_validator_worker(
 
     - OpenAI / 中转站 Key 走缓存 + 域名健康度 + 智能重试路径
     - 其余平台走 validate_key_async 通用分发
-    - 入库使用完整 LeakedKey（修复 ScanResult 直接入队导致
-      批量写入时缺 status/balance 等字段、记录被静默丢弃的问题）
+    - 入库使用完整 LeakedKey（ScanResult 入队后补 status / model_tier / rpm）
     """
     from validator import validate_key_async, CircuitBreaker
 
