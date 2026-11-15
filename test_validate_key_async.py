@@ -28,14 +28,12 @@ async def test_dispatch_routes_to_platform_method(monkeypatch):
 
     monkeypatch.setattr(AsyncValidator, "validate_gemini", fake_gemini)
 
-    status, balance, tier, rpm, high = await validate_key_async("gemini", "k1", PUBLIC_URL)
+    status, tier, rpm = await validate_key_async("gemini", "k1", PUBLIC_URL)
 
     assert calls == [("k1", PUBLIC_URL)]
     assert status == KeyStatus.VALID
     assert tier == "Gemini-Pro"
     assert rpm == 1000
-    assert balance == ""
-    assert high is False
 
 
 async def test_azure_flag_set_for_azure_platform(monkeypatch):

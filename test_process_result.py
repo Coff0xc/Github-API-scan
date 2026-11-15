@@ -20,7 +20,7 @@ def test_process_result_does_not_score_or_store_value():
 
             async def fake_validate(_result):
                 return ValidationResult(
-                    KeyStatus.VALID, "3模型", "GPT-4", 8000, 50.0, True,
+                    KeyStatus.VALID, "3模型", "GPT-4", 8000,
                 )
 
             validator.validate_single = fake_validate
@@ -62,6 +62,15 @@ def test_leaked_key_has_no_retired_value_fields():
     from database import LeakedKey
 
     names = {f.name for f in fields(LeakedKey)}
+    for retired in ("is_high_value", "balance", "balance_usd", "value_score"):
+        assert retired not in names
+
+
+def test_validation_result_has_no_retired_value_fields():
+    from dataclasses import fields
+    from validator import ValidationResult
+
+    names = {f.name for f in fields(ValidationResult)}
     for retired in ("is_high_value", "balance", "balance_usd", "value_score"):
         assert retired not in names
 
@@ -144,6 +153,7 @@ def _leaked_key(platform, api_key):
 if __name__ == "__main__":
     test_process_result_does_not_score_or_store_value()
     test_leaked_key_has_no_retired_value_fields()
+    test_validation_result_has_no_retired_value_fields()
     test_platform_checks_do_not_flag_high_value()
     test_claim_then_upsert_writes_final_status_once()
     test_queued_insert_must_flush_before_status_update()

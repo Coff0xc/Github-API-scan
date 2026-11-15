@@ -65,9 +65,7 @@ async def validate_openai(self, api_key: str, base_url: str) -> ValidationResult
                     if rpm_tier:
                         info = f"{info} [{rpm_tier}]"
 
-                    is_high = model_tier == "GPT-4" or rpm >= RPM_ENTERPRISE_THRESHOLD
-
-                    return ValidationResult(KeyStatus.VALID, info, model_tier, rpm, 0.0, is_high)
+                    return ValidationResult(KeyStatus.VALID, info, model_tier, rpm)
 
                 elif resp.status == 429:
                     await self._record_circuit_result(url, http_status=429)
@@ -96,7 +94,7 @@ async def validate_openai(self, api_key: str, base_url: str) -> ValidationResult
             async with session.post(url, headers=headers, json=chat_body, proxy=proxy) as resp:
                 if resp.status == 200:
                     await self._record_circuit_result(url, success=True)
-                    return ValidationResult(KeyStatus.VALID, "有效(chat)", model_tier, rpm, 0.0, False)
+                    return ValidationResult(KeyStatus.VALID, "有效(chat)", model_tier, rpm)
                 elif resp.status == 429:
                     await self._record_circuit_result(url, http_status=429)
                     return ValidationResult(KeyStatus.QUOTA_EXCEEDED, "配额耗尽")

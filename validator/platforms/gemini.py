@@ -36,7 +36,7 @@ async def validate_gemini(self, api_key: str, base_url: str) -> ValidationResult
                 models = data.get("models", [])
                 has_pro = any('gemini-1.5-pro' in m.get('name', '').lower() for m in models)
                 tier = "Gemini-Pro" if has_pro else "Gemini"
-                return ValidationResult(KeyStatus.VALID, f"{len(models)}模型", tier, 0, 0.0, has_pro)
+                return ValidationResult(KeyStatus.VALID, f"{len(models)}模型", tier, 0)
             elif resp.status == 429:
                 await self._record_circuit_result(url, http_status=429)
                 return ValidationResult(KeyStatus.QUOTA_EXCEEDED, "Gemini配额耗尽")

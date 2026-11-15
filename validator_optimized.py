@@ -502,7 +502,7 @@ async def optimized_validator_worker(
                     model_tier = vr.model_tier
                     rpm = vr.rpm
                 else:
-                    status, _balance, model_tier, rpm, _is_high = await validate_key_async(
+                    status, model_tier, rpm = await validate_key_async(
                         result.platform,
                         result.api_key,
                         result.base_url,

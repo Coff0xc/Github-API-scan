@@ -27,7 +27,7 @@ async def validate_azure(self, api_key: str, base_url: str) -> ValidationResult:
         async with session.get(url, headers=headers, proxy=proxy) as resp:
             if resp.status == 200:
                 await self._record_circuit_result(url, success=True)
-                return ValidationResult(KeyStatus.VALID, "Azure有效", "Azure-GPT", 0, 0.0, True)
+                return ValidationResult(KeyStatus.VALID, "Azure有效", "Azure-GPT", 0)
             elif resp.status == 429:
                 await self._record_circuit_result(url, http_status=429)
                 return ValidationResult(KeyStatus.QUOTA_EXCEEDED, "Azure配额耗尽")

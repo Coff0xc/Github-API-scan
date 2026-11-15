@@ -192,9 +192,9 @@ async def validate_key_async(
     api_key: str,
     base_url: str = "",
     circuit_breaker: Optional[CircuitBreaker] = None,
-) -> Tuple[KeyStatus, str, str, int, bool]:
+) -> Tuple[KeyStatus, str, int]:
     """
-    按平台分发验证，返回 (status, balance, model_tier, rpm, is_high_value)。
+    按平台分发验证，返回 (status, model_tier, rpm)。
 
     validator_optimized 的验证 worker 对非 openai/relay 平台调用本函数；
     openai/relay 走 OptimizedAsyncValidator 的缓存路径，不经这里。
@@ -215,7 +215,7 @@ async def validate_key_async(
             is_azure=(platform == "azure"),
             is_relay=bool(base_url),
         ))
-        return result.status, "", result.model_tier or "", result.rpm or 0, False
+        return result.status, result.model_tier or "", result.rpm or 0
     finally:
         await validator.close()
 

@@ -61,11 +61,11 @@ async def validate_anthropic(self, api_key: str, base_url: str) -> ValidationRes
             elif resp.status == 400:
                 await self._record_circuit_result(url, http_status=400)
                 if "credit" in response_text.lower() and "balance" in response_text.lower():
-                    return ValidationResult(KeyStatus.QUOTA_EXCEEDED, "Claude余额不足", "Claude-3", 0, 0.0, False)
+                    return ValidationResult(KeyStatus.QUOTA_EXCEEDED, "Claude余额不足", "Claude-3", 0)
                 elif "billing" in response_text.lower():
-                    return ValidationResult(KeyStatus.QUOTA_EXCEEDED, "Claude账单问题", "Claude-3", 0, 0.0, False)
+                    return ValidationResult(KeyStatus.QUOTA_EXCEEDED, "Claude账单问题", "Claude-3", 0)
                 else:
-                    return ValidationResult(KeyStatus.VALID, "有效(请求错误)", "Claude", 0, 0.0, False)
+                    return ValidationResult(KeyStatus.VALID, "有效(请求错误)", "Claude", 0)
 
             elif resp.status == 401:
                 await self._record_circuit_result(url, http_status=401)
@@ -75,7 +75,7 @@ async def validate_anthropic(self, api_key: str, base_url: str) -> ValidationRes
                 await self._record_circuit_result(url, http_status=403)
                 if "disabled" in response_text.lower():
                     return ValidationResult(KeyStatus.INVALID, "Claude Key已禁用")
-                return ValidationResult(KeyStatus.QUOTA_EXCEEDED, "Claude权限受限", "Claude", 0, 0.0, False)
+                return ValidationResult(KeyStatus.QUOTA_EXCEEDED, "Claude权限受限", "Claude", 0)
 
             elif resp.status == 429:
                 await self._record_circuit_result(url, http_status=429)

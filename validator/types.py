@@ -16,10 +16,8 @@ RPM_FREE_TRIAL_THRESHOLD = 20
 
 @dataclass
 class ValidationResult:
-    """验证结果数据类"""
+    """验证结果：状态、说明、模型档位、RPM。"""
     status: KeyStatus
     info: str
     model_tier: str = ""
     rpm: int = 0
-    balance_usd: float = 0.0
-    is_high_value: bool = False
