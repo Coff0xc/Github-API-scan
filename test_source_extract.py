@@ -17,6 +17,58 @@ OVERLAP_OPENAI = f"sk-{_HEX64}"
 SOURCE = "https://example.test/leak"
 
 
+def test_bare_hex_requires_platform_hint():
+    hex64 = "ab" * 32
+    assert select_key_matches(COMPILED_KEY_PATTERNS, f"token={hex64}") == []
+    hinted = select_key_matches(COMPILED_KEY_PATTERNS, f"together token={hex64}")
+    assert [item[2] for item in hinted] == ["together"]
+    assert hinted[0][3] == hex64
+
+
+def test_azure_hex_requires_azure_context():
+    hex32 = "a1b2c3d4" * 4
+    assert select_key_matches(COMPILED_KEY_PATTERNS, f"api_key={hex32}") == []
+    hinted = select_key_matches(
+        COMPILED_KEY_PATTERNS,
+        f"AZURE_OPENAI_KEY={hex32}\nAZURE_OPENAI_ENDPOINT=https://acme.openai.azure.com",
+    )
+    assert [item[2] for item in hinted] == ["azure"]
+    assert hinted[0][3] == hex32
+
+
+def test_extract_pairs_assignment_base_url():
+    key = "sk-proj-Qw9Rt8Yu7Ip6Lk5Jh4Gf3Ds2Az1Xc0Vb"
+    text = (
+        "OPENAI_BASE_URL=https://api.internal-relay.invalid/v1\n"
+        f"{key}\n"
+    )
+    results = extract_source_keys(COMPILED_KEY_PATTERNS, text, SOURCE)
+    assert [item.api_key for item in results] == [key]
+    assert results[0].platform == "openai"
+    assert results[0].base_url == "https://api.internal-relay.invalid/v1"
+    assert results[0].is_relay is True
+
+
+def test_public_source_ids_survive_restart():
+    from database import Database
+    from source_gist import GistScanner
+    from source_gitlab import GitLabScanner
+    from source_pastebin import PastebinScanner
+    from source_searchcode import SearchCodeScanner
+
+    db = Database(":memory:")
+    db.mark_blob_scanned("gist:g1")
+    db.mark_blob_scanned("gitlab:9")
+    db.mark_blob_scanned("paste:p1")
+    db.mark_blob_scanned("searchcode:s1")
+    stop = threading.Event()
+    pending = queue.Queue()
+    assert "g1" in GistScanner(pending, stop, db=db)._processed_gists
+    assert "9" in GitLabScanner(pending, stop, db=db)._processed_ids
+    assert "p1" in PastebinScanner(pending, stop, db=db)._processed_pastes
+    assert "s1" in SearchCodeScanner(pending, stop, db=db)._processed_ids
+
+
 def test_select_key_matches_drops_contained_shorter_hit():
     matches = select_key_matches(COMPILED_KEY_PATTERNS, OVERLAP_TEXT)
     keys = [item[3] for item in matches]
