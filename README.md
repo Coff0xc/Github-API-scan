@@ -410,7 +410,7 @@ use_boundary.py         the yes-prompt and the scope check
 scanner.py              GitHub search, and pairing a key with its address
 local_scanner.py        a folder, and each unique Git file once
 validator_optimized.py  the check the command actually runs
-validator.py            shared types, the breaker, and the older check
+validator/              shared types, the breaker, platform checks, older dispatch
 findings_feed.py        findings.json and the four-line notice
 database.py             SQLite, already-read files, status by id
 key_vault.py            scrambling the key, and the fingerprint

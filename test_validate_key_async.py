@@ -104,3 +104,46 @@ async def test_accepts_caller_circuit_breaker(monkeypatch):
         "other", "sk-y", PUBLIC_URL, circuit_breaker=breaker
     )
     assert status == KeyStatus.INVALID
+
+
+PLATFORM_VALIDATE_METHODS = (
+    "validate_openai",
+    "validate_gemini",
+    "validate_anthropic",
+    "validate_azure",
+    "validate_huggingface",
+    "validate_groq",
+    "validate_deepseek",
+    "validate_cohere",
+    "validate_mistral",
+    "validate_together",
+    "validate_replicate",
+    "validate_perplexity",
+    "validate_fireworks",
+    "validate_stripe",
+    "validate_github_token",
+    "validate_moonshot",
+    "validate_zhipu",
+    "validate_baichuan",
+    "validate_minimax",
+    "validate_aliyun_bailian",
+    "validate_volcengine",
+    "validate_tencent_hunyuan",
+    "validate_aws_bedrock",
+    "validate_openrouter",
+    "validate_portkey",
+    "validate_litellm",
+    "validate_cloudflare_ai",
+    "validate_xai",
+    "validate_meta_llama",
+    "validate_aws_access_key",
+)
+
+
+def test_all_platform_methods_bound_on_async_validator():
+    from database import Database
+
+    validator = AsyncValidator(Database(":memory:"))
+    for name in PLATFORM_VALIDATE_METHODS:
+        assert hasattr(validator, name), name
+        assert callable(getattr(validator, name))

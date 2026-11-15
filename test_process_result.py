@@ -57,10 +57,11 @@ def _fail(name):
 
 
 def test_platform_checks_do_not_flag_high_value():
-    import inspect
+    from pathlib import Path
     import validator
 
-    source = inspect.getsource(validator.AsyncValidator)
+    root = Path(validator.__file__).resolve().parent
+    source = "\n".join(p.read_text(encoding="utf-8") for p in root.rglob("*.py"))
     assert "is_high_value=True" not in source
     assert "is_high_value=balance" not in source
     assert "def probe_billing" not in source
