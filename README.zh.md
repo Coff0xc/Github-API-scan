@@ -1,16 +1,14 @@
 <h1 align="center">AI API Key Scanner</h1>
 
 <p align="center">
-<b>找出泄露的 OpenAI / Claude / Gemini / Grok / DeepSeek 密钥。</b><br>
-把密钥和旁边的中转地址绑在一起，检查这对组合是否还活着。<br>
+扫一个组织、一个仓库，或一份本地 git 树。<br>
+每条发现是一对 <code>(密钥, base_url)</code>：向文件里写的那个地址确认密钥是否仍有效，再写出脱敏记录。<br>
 完整密钥留在跑扫描的那台机器上。
 </p>
 
 <p align="center">
-  <a href="https://github.com/Coff0xc/Github-API-scan/stargazers"><img src="https://img.shields.io/github/stars/Coff0xc/Github-API-scan?style=social" alt="GitHub stars"></a>
   <img src="https://img.shields.io/badge/python-3.10+-3776AB?logo=python&logoColor=white" alt="Python 3.10+">
   <img src="https://img.shields.io/badge/license-MIT-111827" alt="MIT license">
-  <img src="https://img.shields.io/badge/platforms-50%2B-1d4ed8" alt="50+ 平台">
   &nbsp;<a href="README.md">English</a>
 </p>
 
@@ -30,7 +28,7 @@ python main_v2.2.py --authorized --scan-local ./your-repo
 python web_dashboard.py    # http://127.0.0.1:5000
 ```
 
-覆盖 50+ 平台（OpenAI、Claude、Gemini、xAI、DeepSeek、OpenRouter、Groq、Azure、Moonshot、智谱等）。文件里写了 `OPENAI_BASE_URL` 一类中转地址时，验证打的是那个地址，不是官方站点。扫完打开本机面板，每行只有平台、脱敏预览和文件位置。
+处理顺序：从文件（本地历史按 blob 去重）抽出密钥形状 → 熵和路径丢掉示例串 → 重叠命中只留更长的 → 绑最近的 `base_url` → 向该主机验证（SSRF 拦私网，本机中转可走 loopback）→ 一次写入最终状态。正则在 import 时编译一次。远程搜索必须带 `--target-org` 或 `--target-repo`。
 
 运行前读 [AUTHORIZED_USE.md](AUTHORIZED_USE.md)，用 `--authorized` 确认范围。远程搜索必须带 `--target-org` 或 `--target-repo`。完整说明、字段表、面板接口见 [英文 README](README.md)。
 

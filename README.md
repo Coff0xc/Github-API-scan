@@ -1,33 +1,20 @@
 <h1 align="center">AI API Key Scanner</h1>
 
 <p align="center">
-<b>Find leaked OpenAI / Claude / Gemini / Grok / DeepSeek keys.</b><br>
-Keeps the relay URL next to the key. Checks if it still works.<br>
-The key stays on the machine that ran the scan.
+Scan one organization, one repository, or a local git tree.<br>
+Each finding is a <code>(key, base_url)</code> pair: the scanner asks that address whether the key still works, then writes a masked record.<br>
+The raw key stays on the machine that ran the scan.
 </p>
 
 <p align="center">
-  <a href="https://github.com/Coff0xc/Github-API-scan/stargazers"><img src="https://img.shields.io/github/stars/Coff0xc/Github-API-scan?style=social" alt="GitHub stars"></a>
-  <a href="https://github.com/Coff0xc/Github-API-scan/network/members"><img src="https://img.shields.io/github/forks/Coff0xc/Github-API-scan?style=social" alt="GitHub forks"></a>
   <img src="https://img.shields.io/badge/python-3.10+-3776AB?logo=python&logoColor=white" alt="Python 3.10+">
   <img src="https://img.shields.io/badge/license-MIT-111827" alt="MIT license">
-  <img src="https://img.shields.io/badge/platforms-50%2B-1d4ed8" alt="50+ platforms">
+  <img src="https://img.shields.io/badge/entry-main__v2.2.py-1d4ed8" alt="Entry point main_v2.2.py">
   &nbsp;<a href="README.zh.md">中文</a>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/OpenAI-412991?logo=openai&logoColor=white" alt="OpenAI">
-  <img src="https://img.shields.io/badge/Claude-D97706" alt="Claude">
-  <img src="https://img.shields.io/badge/Gemini-4285F4?logo=google&logoColor=white" alt="Gemini">
-  <img src="https://img.shields.io/badge/xAI_Grok-111111" alt="xAI">
-  <img src="https://img.shields.io/badge/DeepSeek-4D6BFE" alt="DeepSeek">
-  <img src="https://img.shields.io/badge/OpenRouter-6D28D9" alt="OpenRouter">
-  <img src="https://img.shields.io/badge/Groq-F55036" alt="Groq">
-  <img src="https://img.shields.io/badge/Azure-0078D4?logo=microsoftazure&logoColor=white" alt="Azure">
-</p>
-
-<p align="center">
-  <img src="assets/screenshot.png" alt="Dashboard: platform, masked preview, file location, disposition" width="920">
+  <img src="assets/screenshot.png" alt="Dashboard of example findings: platform, masked preview, file location, and disposition" width="920">
 </p>
 
 ```bash
@@ -42,7 +29,7 @@ python main_v2.2.py --authorized --scan-local ./your-repo
 python web_dashboard.py    # http://127.0.0.1:5000
 ```
 
-50+ platforms. Pairs each key with the `base_url` written beside it, so a LiteLLM / custom relay is checked at that address. Live keys land in a local dashboard as a masked row. Pass `--authorized` after you have read [AUTHORIZED_USE.md](AUTHORIZED_USE.md).
+How a row is built: extract key shapes from the file (and unique git blobs for a local history scan) → drop test/example strings by entropy and path → keep the longest match when two patterns overlap → bind the nearest `base_url` / `OPENAI_BASE_URL` → check that host (SSRF: no private/link-local/reserved addresses; loopback is allowed for a local relay) → one SQLite write with the final status. Patterns are compiled once at import. Remote search does not start without `--target-org` or `--target-repo`. Pass `--authorized` after [AUTHORIZED_USE.md](AUTHORIZED_USE.md).
 
 | If you own the code | If you run the scan |
 | --- | --- |
