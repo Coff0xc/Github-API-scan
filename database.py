@@ -45,22 +45,15 @@ class LeakedKey:
     - status: 验证状态
     - model_tier: 模型阶梯 (GPT-4/GPT-3.5)
     - rpm: 速率限制
-
-    兼容字段：balance、is_high_value、balance_usd、value_score 等为旧调用
-    保留，验证回写只更新 status / model_tier / rpm，不再写入数据库。
     """
     platform: str           # openai, azure, gemini, anthropic
     api_key: str            # API Key
     base_url: str           # 绑定的 Base URL
     status: str = KeyStatus.PENDING.value
-    balance: str = ""       # 余额/模型信息（保留向后兼容）
     source_url: str = ""    # GitHub 来源链接
     model_tier: str = ""    # 模型阶梯: GPT-4, GPT-3.5, Gemini-Pro 等
     rpm: int = 0            # Rate Per Minute
-    is_high_value: bool = False  # 已废弃：旧调用兼容，不再保存
 
-    # 深度验证字段
-    balance_usd: float = 0.0      # 已废弃：旧调用兼容，不再保存
     used_quota_usd: float = 0.0   # 已用额度
     total_quota_usd: float = 0.0  # 总额度
     tpm: int = 0                  # Tokens per minute
@@ -72,7 +65,6 @@ class LeakedKey:
     account_name: str = ""        # 账户名称
     expiration_date: str = ""     # 到期日期
     key_type: str = ""            # 密钥类型: project/service_account/user
-    value_score: int = 0          # 已废弃：旧调用兼容，不再保存
 
     found_time: datetime = None
     id: int = None
@@ -405,30 +397,10 @@ class Database:
         self,
         api_key: str,
         status: KeyStatus,
-        balance: str = "",
         model_tier: str = "",
         rpm: int = 0,
-        is_high_value: bool = False,  # 旧调用仍可传入，不再写入
-        # 深度验证参数
-        balance_usd: float = 0.0,
-        used_quota_usd: float = 0.0,
-        total_quota_usd: float = 0.0,
-        tpm: int = 0,
-        rpd: int = 0,
-        has_gpt4: bool = False,
-        has_gpt5: bool = False,
-        has_claude_opus: bool = False,
-        organization: str = "",
-        account_name: str = "",
-        expiration_date: str = "",
-        key_type: str = "",
-        value_score: int = 0
     ) -> bool:
-        """回写状态、模型档位和 RPM。其余参数仍可传入，不再写入。"""
-        del balance, is_high_value, balance_usd, value_score
-        del used_quota_usd, total_quota_usd, tpm, rpd
-        del has_gpt4, has_gpt5, has_claude_opus
-        del organization, account_name, expiration_date, key_type
+        """回写状态、模型档位和 RPM。"""
         with self._lock:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -576,7 +548,6 @@ class Database:
             api_key=vault.decrypt(row_dict.get("api_key", "")),
             base_url=row_dict.get("base_url", ""),
             status=row_dict.get("status", "pending"),
-            balance=row_dict.get("balance") or "",
             source_url=row_dict.get("source_url") or "",
             model_tier=row_dict.get("model_tier") or "",
             rpm=row_dict.get("rpm") or 0,

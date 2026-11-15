@@ -57,7 +57,6 @@ async def test_full_integration():
             api_key=f"sk-test-{i:04d}-{'x' * 40}",
             base_url="https://api.openai.com",
             status=KeyStatus.PENDING.value,
-            balance="",
             source_url=f"https://github.com/test/repo{i}",
             found_time=datetime.now()
         )

@@ -259,13 +259,10 @@ class AsyncDatabase:
         self,
         api_key: str,
         status: KeyStatus,
-        balance: str = "",
         model_tier: str = "",
         rpm: int = 0,
-        is_high_value: bool = False
     ):
-        """更新状态、模型档位和 RPM。余额参数仍可传入，不再写入。"""
-        del balance, is_high_value
+        """更新状态、模型档位和 RPM。"""
         async with self._conn_lock:
             await self._conn.execute(
                 """

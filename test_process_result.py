@@ -43,6 +43,7 @@ def test_process_result_does_not_score_or_store_value():
             assert row == ("valid", "GPT-4", 8000)
             for retired in ("is_high_value", "balance", "balance_usd", "value_score"):
                 assert retired not in columns
+                assert not hasattr(stored[0], retired)
             for name in ("probe_billing", "probe_gpt4", "probe_quota_by_request"):
                 assert not hasattr(AsyncValidator, name)
 
@@ -54,6 +55,15 @@ def _fail(name):
         raise AssertionError(name)
 
     return _inner
+
+
+def test_leaked_key_has_no_retired_value_fields():
+    from dataclasses import fields
+    from database import LeakedKey
+
+    names = {f.name for f in fields(LeakedKey)}
+    for retired in ("is_high_value", "balance", "balance_usd", "value_score"):
+        assert retired not in names
 
 
 def test_platform_checks_do_not_flag_high_value():
@@ -108,7 +118,7 @@ def test_queued_insert_must_flush_before_status_update():
             await db.init()
             await db.queue_insert(_leaked_key("gemini", KEY))
             await db.flush()
-            await db.update_key_status(KEY, KeyStatus.CONNECTION_ERROR, "", "", 0, False)
+            await db.update_key_status(KEY, KeyStatus.CONNECTION_ERROR)
             await db.close()
             with sqlite3.connect(path) as conn:
                 row = conn.execute("SELECT status FROM leaked_keys").fetchone()
@@ -133,6 +143,7 @@ def _leaked_key(platform, api_key):
 
 if __name__ == "__main__":
     test_process_result_does_not_score_or_store_value()
+    test_leaked_key_has_no_retired_value_fields()
     test_platform_checks_do_not_flag_high_value()
     test_claim_then_upsert_writes_final_status_once()
     test_queued_insert_must_flush_before_status_update()

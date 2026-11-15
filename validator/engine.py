@@ -146,10 +146,8 @@ class AsyncValidator:
             self.db.update_key_status(
                 result.api_key,
                 vr.status,
-                "",
                 model_tier=vr.model_tier,
                 rpm=vr.rpm,
-                is_high_value=False,
             )
 
             if self.dashboard:

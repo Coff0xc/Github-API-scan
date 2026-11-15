@@ -24,8 +24,7 @@ def test_report_orders_by_time_and_skips_value_columns():
             found_time=datetime(2026, 11, 1, 8, 0),
         ))
         db.update_key_status(
-            OLD, KeyStatus.VALID, balance="$999", model_tier="GPT-4",
-            rpm=10000, is_high_value=True, balance_usd=999,
+            OLD, KeyStatus.VALID, model_tier="GPT-4", rpm=10000,
         )
         db.insert_key(LeakedKey(
             platform="anthropic",
