@@ -13,7 +13,10 @@ v2.1 优化（保留）：
 """
 
 import asyncio
+import inspect
+import queue as thread_queue
 import ssl
+from functools import partial
 from typing import Tuple, Optional, Dict, Any
 from datetime import datetime
 from dataclasses import dataclass
@@ -430,8 +433,27 @@ def _safe_dashboard(dashboard, method: str, *args, **kwargs):
         pass
 
 
+async def take_queued_result(result_queue, timeout: float = 1.0):
+    """从扫描线程的同步队列或 asyncio.Queue 取出一条结果。"""
+    getter = result_queue.get
+    if inspect.iscoroutinefunction(getter):
+        item = await asyncio.wait_for(getter(), timeout=timeout)
+        if item is None:
+            raise asyncio.TimeoutError
+        return item
+    if isinstance(result_queue, asyncio.Queue):
+        return await asyncio.wait_for(result_queue.get(), timeout=timeout)
+    loop = asyncio.get_running_loop()
+    try:
+        return await loop.run_in_executor(
+            None, partial(result_queue.get, timeout=timeout)
+        )
+    except thread_queue.Empty:
+        raise asyncio.TimeoutError
+
+
 async def optimized_validator_worker(
-    result_queue: 'asyncio.Queue',
+    result_queue,
     async_db,
     stop_event,
     dashboard=None,
@@ -458,7 +480,7 @@ async def optimized_validator_worker(
     try:
         while not stop_event.is_set():
             try:
-                result = await asyncio.wait_for(result_queue.get(), timeout=1.0)
+                result = await take_queued_result(result_queue, timeout=1.0)
             except asyncio.TimeoutError:
                 continue
             except Exception as e:
@@ -549,7 +571,7 @@ async def optimized_validator_worker(
 
 
 def start_validators(
-    result_queue: 'asyncio.Queue',
+    result_queue,
     async_db,
     stop_event,
     dashboard=None,
@@ -560,7 +582,7 @@ def start_validators(
     启动 v2.2 优化版验证器（每个线程内跑独立事件循环）
 
     Args:
-        result_queue: asyncio.Queue 扫描结果队列
+        result_queue: asyncio.Queue 或 queue.Queue 扫描结果队列
         async_db: AsyncDatabase 异步数据库
         stop_event: threading.Event 停止信号
         dashboard: Dashboard UI 实例

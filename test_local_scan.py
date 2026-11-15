@@ -1,14 +1,17 @@
 """本地历史扫描：同一 blob 只解析一次，并能从相邻行配对 base_url。"""
 
+import asyncio
+import inspect
 import os
 import queue
 import subprocess
 import tempfile
 import threading
+import time
 
-from database import Database
-from local_scanner import LocalScanner
-from scanner import content_variants
+from database import Database, KeyStatus
+from local_scanner import LocalScanner, run_local_scan
+from scanner import ScanResult, content_variants
 
 
 KEY = "sk-proj-Qw9Rt8Yu7Ip6Lk5Jh4Gf3Ds2Az1Xc0Vb"
@@ -90,7 +93,82 @@ def test_history_reads_each_blob_once_and_pairs_base_url():
         assert again_stats["blobs_scanned"] == 0
 
 
+def test_run_local_scan_uses_optimized_validator():
+    source = inspect.getsource(run_local_scan)
+    assert "validator_optimized" in source
+    assert "from validator import start_validators" not in source
+    assert "AsyncDatabase" in source
+
+
+def test_take_queued_result_from_sync_queue():
+    from validator_optimized import take_queued_result
+
+    pending = queue.Queue()
+    item = ScanResult(
+        platform="openai",
+        api_key=KEY,
+        base_url="https://api.openai.com/v1",
+        source_url="local",
+    )
+
+    async def run():
+        pending.put(item)
+        got = await take_queued_result(pending, timeout=1.0)
+        assert got is item
+        try:
+            await take_queued_result(pending, timeout=0.05)
+        except asyncio.TimeoutError:
+            return
+        raise AssertionError("empty sync queue should time out")
+
+    asyncio.run(run())
+
+
+def test_optimized_worker_drains_sync_queue_and_upserts(monkeypatch):
+    from async_database import AsyncDatabase
+    from validator import ValidationResult
+    from validator_optimized import OptimizedAsyncValidator, start_validators
+
+    async def fake_openai(self, api_key, base_url):
+        return ValidationResult(KeyStatus.INVALID, "auth failed")
+
+    monkeypatch.setattr(OptimizedAsyncValidator, "validate_openai", fake_openai)
+
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as root:
+        path = os.path.join(root, "keys.db")
+        async_db = AsyncDatabase(path)
+        asyncio.run(async_db.init())
+        pending = queue.Queue()
+        stop = threading.Event()
+        threads = start_validators(
+            pending, async_db, stop, num_workers=1, cache_config=None,
+        )
+        pending.put(ScanResult(
+            platform="openai",
+            api_key=KEY,
+            base_url="https://api.openai.com/v1",
+            source_url="https://example.test/settings.py",
+        ))
+        deadline = time.time() + 8
+        rows = []
+        while time.time() < deadline:
+            db = Database(path)
+            rows = db.get_keys_by_status(KeyStatus.INVALID)
+            if rows:
+                break
+            time.sleep(0.05)
+        stop.set()
+        for thread in threads:
+            thread.join(timeout=3)
+        asyncio.run(async_db.close())
+        assert len(rows) == 1
+        assert rows[0].api_key == KEY
+        assert rows[0].status == KeyStatus.INVALID.value
+
+
 if __name__ == "__main__":
     test_content_variants_skip_identical_decode()
     test_history_reads_each_blob_once_and_pairs_base_url()
+    test_run_local_scan_uses_optimized_validator()
+    test_take_queued_result_from_sync_queue()
     print("local scan ok")

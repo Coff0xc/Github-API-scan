@@ -415,12 +415,23 @@ def run_local_scan(
     本地扫描完整流程（含 TUI 与验证管线），供 main 入口直接调用。
 
     扫描结束（Ctrl+C 中断亦可）后返回数据库统计。
+    验证走 validator_optimized：claim → validate → upsert。
     """
+    import asyncio as _asyncio
     import time as _time
+    from async_database import AsyncDatabase
+    from cache_manager import CacheConfig
     from ui import Dashboard
-    from validator import start_validators
+    from validator_optimized import start_validators
 
     db = Database(db_path or config.db_path)
+    async_db = AsyncDatabase(db.db_path)
+    init_loop = _asyncio.new_event_loop()
+    try:
+        init_loop.run_until_complete(async_db.init())
+    finally:
+        init_loop.close()
+
     result_queue = queue.Queue(maxsize=10000)
     stop_event = threading.Event()
     dashboard = Dashboard()
@@ -428,7 +439,12 @@ def run_local_scan(
     dashboard.update_stats(total_tokens=0, is_running=True)
 
     validator_threads = start_validators(
-        result_queue, db, stop_event, dashboard=dashboard, num_workers=num_validators
+        result_queue,
+        async_db,
+        stop_event,
+        dashboard=dashboard,
+        num_workers=num_validators,
+        cache_config=CacheConfig(),
     )
     scanner_thread = start_local_scanner(
         root, result_queue, stop_event, dashboard=dashboard,
@@ -437,17 +453,32 @@ def run_local_scan(
 
     try:
         with dashboard.start():
-            while scanner_thread.is_alive() or any(t.is_alive() for t in validator_threads):
+            while scanner_thread.is_alive():
                 dashboard.update_stats(queue_size=result_queue.qsize())
                 dashboard.refresh()
+                _time.sleep(0.25)
+            deadline = _time.time() + 30
+            idle = 0
+            while _time.time() < deadline:
+                dashboard.update_stats(queue_size=result_queue.qsize())
+                dashboard.refresh()
+                if result_queue.empty():
+                    idle += 1
+                    if idle >= 8:
+                        break
+                else:
+                    idle = 0
                 _time.sleep(0.25)
     except KeyboardInterrupt:
         dashboard.add_log("收到中断信号，正在停止...", "WARN")
     finally:
         stop_event.set()
-        # 给验证器 30s 清空队列余量
-        deadline = _time.time() + 30
-        while not result_queue.empty() and _time.time() < deadline:
-            _time.sleep(0.5)
+        for thread in validator_threads:
+            thread.join(timeout=5)
+        close_loop = _asyncio.new_event_loop()
+        try:
+            close_loop.run_until_complete(async_db.close())
+        finally:
+            close_loop.close()
 
     return db.get_stats()
