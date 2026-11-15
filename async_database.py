@@ -85,7 +85,12 @@ class AsyncDatabase:
             pass
         async with db.execute("PRAGMA table_info(leaked_keys)") as cursor:
             columns = {row[1] for row in await cursor.fetchall()}
-        for retired in ("is_high_value", "balance", "balance_usd", "value_score"):
+        for retired in (
+            "is_high_value", "balance", "balance_usd", "value_score",
+            "used_quota_usd", "total_quota_usd", "tpm", "rpd",
+            "has_gpt4", "has_gpt5", "has_claude_opus",
+            "organization", "account_name", "expiration_date", "key_type",
+        ):
             if retired in columns:
                 await db.execute(f"ALTER TABLE leaked_keys DROP COLUMN {retired}")
 

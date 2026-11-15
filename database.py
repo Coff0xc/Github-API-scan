@@ -53,19 +53,6 @@ class LeakedKey:
     source_url: str = ""    # GitHub 来源链接
     model_tier: str = ""    # 模型阶梯: GPT-4, GPT-3.5, Gemini-Pro 等
     rpm: int = 0            # Rate Per Minute
-
-    used_quota_usd: float = 0.0   # 已用额度
-    total_quota_usd: float = 0.0  # 总额度
-    tpm: int = 0                  # Tokens per minute
-    rpd: int = 0                  # Requests per day
-    has_gpt4: bool = False        # GPT-4 访问权限
-    has_gpt5: bool = False        # GPT-5 访问权限
-    has_claude_opus: bool = False # Claude Opus 访问权限
-    organization: str = ""        # 组织名称
-    account_name: str = ""        # 账户名称
-    expiration_date: str = ""     # 到期日期
-    key_type: str = ""            # 密钥类型: project/service_account/user
-
     found_time: datetime = None
     id: int = None
 
@@ -121,7 +108,6 @@ class Database:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 
-                # 创建主表（优化后的结构 + 深度验证字段）
                 # api_key 列: 启用 DB_ENCRYPTION_KEY 时存 Fernet 密文（enc:v1: 前缀）
                 # key_hash 列: SHA-256 指纹，用于唯一去重（不随加密开关变化）
                 cursor.execute("""
@@ -136,20 +122,7 @@ class Database:
                         model_tier TEXT DEFAULT '',
                         rpm INTEGER DEFAULT 0,
                         found_time DATETIME DEFAULT CURRENT_TIMESTAMP,
-                        verified_time DATETIME,
-
-                        -- 深度验证字段（P4）
-                        used_quota_usd REAL DEFAULT 0.0,
-                        total_quota_usd REAL DEFAULT 0.0,
-                        tpm INTEGER DEFAULT 0,
-                        rpd INTEGER DEFAULT 0,
-                        has_gpt4 BOOLEAN DEFAULT 0,
-                        has_gpt5 BOOLEAN DEFAULT 0,
-                        has_claude_opus BOOLEAN DEFAULT 0,
-                        organization TEXT DEFAULT '',
-                        account_name TEXT DEFAULT '',
-                        expiration_date TEXT DEFAULT '',
-                        key_type TEXT DEFAULT ''
+                        verified_time DATETIME
                     )
                 """)
 
@@ -182,27 +155,6 @@ class Database:
                     cursor.execute("ALTER TABLE leaked_keys ADD COLUMN rpm INTEGER DEFAULT 0")
                 except sqlite3.OperationalError:
                     pass
-                # 深度验证字段迁移。余额和价值分不再入库。
-                deep_validation_fields = [
-                    ("used_quota_usd", "REAL DEFAULT 0.0"),
-                    ("total_quota_usd", "REAL DEFAULT 0.0"),
-                    ("tpm", "INTEGER DEFAULT 0"),
-                    ("rpd", "INTEGER DEFAULT 0"),
-                    ("has_gpt4", "BOOLEAN DEFAULT 0"),
-                    ("has_gpt5", "BOOLEAN DEFAULT 0"),
-                    ("has_claude_opus", "BOOLEAN DEFAULT 0"),
-                    ("organization", "TEXT DEFAULT ''"),
-                    ("account_name", "TEXT DEFAULT ''"),
-                    ("expiration_date", "TEXT DEFAULT ''"),
-                    ("key_type", "TEXT DEFAULT ''"),
-                ]
-
-                for field_name, field_type in deep_validation_fields:
-                    try:
-                        cursor.execute(f"ALTER TABLE leaked_keys ADD COLUMN {field_name} {field_type}")
-                        logger.info(f"Added new column: {field_name}")
-                    except sqlite3.OperationalError:
-                        pass  # 字段已存在
 
                 try:
                     cursor.execute(
@@ -216,7 +168,12 @@ class Database:
                 )
 
                 columns = {row[1] for row in cursor.execute("PRAGMA table_info(leaked_keys)")}
-                for retired in ("is_high_value", "balance", "balance_usd", "value_score"):
+                for retired in (
+                    "is_high_value", "balance", "balance_usd", "value_score",
+                    "used_quota_usd", "total_quota_usd", "tpm", "rpd",
+                    "has_gpt4", "has_gpt5", "has_claude_opus",
+                    "organization", "account_name", "expiration_date", "key_type",
+                ):
                     if retired in columns:
                         cursor.execute(f"ALTER TABLE leaked_keys DROP COLUMN {retired}")
 
@@ -349,23 +306,15 @@ class Database:
                 return cursor.fetchone() is not None
     
     def insert_key(self, key: LeakedKey) -> bool:
-        """
-        插入新的泄露密钥（支持深度验证字段）
-
-        Returns:
-            插入是否成功（已存在返回 False）
-        """
+        """插入新的泄露密钥。已存在返回 False。"""
         with self._lock:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 try:
                     cursor.execute("""
                         INSERT INTO leaked_keys
-                        (platform, api_key, key_hash, base_url, status, source_url, model_tier, rpm, found_time,
-                         used_quota_usd, total_quota_usd, tpm, rpd,
-                         has_gpt4, has_gpt5, has_claude_opus, organization, account_name,
-                         expiration_date, key_type)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        (platform, api_key, key_hash, base_url, status, source_url, model_tier, rpm, found_time)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
                         key.platform,
                         vault.encrypt(key.api_key),
@@ -376,17 +325,6 @@ class Database:
                         key.model_tier,
                         key.rpm,
                         key.found_time.isoformat() if key.found_time else datetime.now().isoformat(),
-                        key.used_quota_usd,
-                        key.total_quota_usd,
-                        key.tpm,
-                        key.rpd,
-                        1 if key.has_gpt4 else 0,
-                        1 if key.has_gpt5 else 0,
-                        1 if key.has_claude_opus else 0,
-                        key.organization,
-                        key.account_name,
-                        key.expiration_date,
-                        key.key_type,
                     ))
                     conn.commit()
                     return True

@@ -41,7 +41,12 @@ def test_process_result_does_not_score_or_store_value():
                 ).fetchone()
                 columns = {info[1] for info in conn.execute("PRAGMA table_info(leaked_keys)")}
             assert row == ("valid", "GPT-4", 8000)
-            for retired in ("is_high_value", "balance", "balance_usd", "value_score"):
+            for retired in (
+                "is_high_value", "balance", "balance_usd", "value_score",
+                "used_quota_usd", "total_quota_usd", "tpm", "rpd",
+                "has_gpt4", "has_gpt5", "has_claude_opus",
+                "organization", "account_name", "expiration_date", "key_type",
+            ):
                 assert retired not in columns
                 assert not hasattr(stored[0], retired)
             for name in ("probe_billing", "probe_gpt4", "probe_quota_by_request"):
@@ -62,8 +67,69 @@ def test_leaked_key_has_no_retired_value_fields():
     from database import LeakedKey
 
     names = {f.name for f in fields(LeakedKey)}
-    for retired in ("is_high_value", "balance", "balance_usd", "value_score"):
+    for retired in (
+        "is_high_value", "balance", "balance_usd", "value_score",
+        "used_quota_usd", "total_quota_usd", "tpm", "rpd",
+        "has_gpt4", "has_gpt5", "has_claude_opus",
+        "organization", "account_name", "expiration_date", "key_type",
+    ):
         assert retired not in names
+
+
+def test_init_drops_retired_p4_columns():
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as root:
+        path = os.path.join(root, "keys.db")
+        with sqlite3.connect(path) as conn:
+            conn.execute("""
+                CREATE TABLE leaked_keys (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    platform TEXT NOT NULL,
+                    api_key TEXT NOT NULL UNIQUE,
+                    key_hash TEXT,
+                    base_url TEXT NOT NULL,
+                    status TEXT DEFAULT 'pending',
+                    used_quota_usd REAL DEFAULT 0.0,
+                    has_gpt4 BOOLEAN DEFAULT 0,
+                    organization TEXT DEFAULT '',
+                    key_type TEXT DEFAULT ''
+                )
+            """)
+            conn.commit()
+        Database(path)
+        with sqlite3.connect(path) as conn:
+            columns = {info[1] for info in conn.execute("PRAGMA table_info(leaked_keys)")}
+        for retired in ("used_quota_usd", "has_gpt4", "organization", "key_type"):
+            assert retired not in columns
+
+        async def drop_via_async():
+            from async_database import AsyncDatabase
+
+            async_path = os.path.join(root, "async.db")
+            with sqlite3.connect(async_path) as conn:
+                conn.execute("""
+                    CREATE TABLE leaked_keys (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        platform TEXT NOT NULL,
+                        api_key TEXT NOT NULL UNIQUE,
+                        key_hash TEXT,
+                        base_url TEXT NOT NULL,
+                        status TEXT DEFAULT 'pending',
+                        total_quota_usd REAL DEFAULT 0.0,
+                        has_claude_opus BOOLEAN DEFAULT 0
+                    )
+                """)
+                conn.commit()
+            async_db = AsyncDatabase(async_path)
+            await async_db.init()
+            await async_db.close()
+            with sqlite3.connect(async_path) as conn:
+                async_columns = {
+                    info[1] for info in conn.execute("PRAGMA table_info(leaked_keys)")
+                }
+            assert "total_quota_usd" not in async_columns
+            assert "has_claude_opus" not in async_columns
+
+        asyncio.run(drop_via_async())
 
 
 def test_validation_result_has_no_retired_value_fields():
