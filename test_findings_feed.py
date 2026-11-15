@@ -157,13 +157,24 @@ def test_notice_and_channel_omit_secret():
         platform="openai",
         api_key=SECRET,
         source_url=LOCATION,
-        balance="$100",
-        is_high_value=True,
     )))
     blob = "\n".join(channel.sent)
     assert SECRET not in blob
-    assert "$100" not in blob
     assert LOCATION in blob
+    assert "$100" not in blob
+    assert "余额/状态" not in blob
+    assert "*余额:*" not in blob
+
+
+def test_keyinfo_has_no_retired_value_fields():
+    from dataclasses import fields
+    from notifier_v2 import KeyInfo, Severity
+
+    names = {f.name for f in fields(KeyInfo)}
+    for retired in ("is_high_value", "balance", "balance_usd", "value_score"):
+        assert retired not in names
+    assert KeyInfo(platform="openai", api_key="sk-x").severity == Severity.MEDIUM
+    assert KeyInfo(platform="openai", api_key="sk-x", model_tier="GPT-4").severity == Severity.HIGH
 
 
 def test_disposition_post_uses_fingerprint_only():
@@ -241,6 +252,7 @@ if __name__ == "__main__":
     test_http_findings_ignore_reveal()
     test_cli_writes_findings()
     test_notice_and_channel_omit_secret()
+    test_keyinfo_has_no_retired_value_fields()
     test_dashboard_home_lists_findings()
     test_disposition_post_uses_fingerprint_only()
     print("findings feed ok")

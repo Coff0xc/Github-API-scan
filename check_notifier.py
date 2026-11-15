@@ -63,10 +63,8 @@ def create_test_key(severity_level: str = "high") -> KeyInfo:
             api_key="sk-proj-test1234567890abcdefghijklmnopqrstuvwxyz",
             base_url="https://api.openai.com",
             model_tier="GPT-4-Turbo",
-            balance="$150.00 remaining",
             rpm=10000,
             source_url="https://github.com/example/repo/blob/main/.env",
-            is_high_value=True,
             found_time=datetime.now()
         ),
         "high": KeyInfo(
@@ -74,10 +72,8 @@ def create_test_key(severity_level: str = "high") -> KeyInfo:
             api_key="sk-ant-api03-test1234567890abcdefghijklmnop",
             base_url="https://api.anthropic.com",
             model_tier="Claude-3.5-Sonnet",
-            balance="Active",
             rpm=4000,
             source_url="https://github.com/example/repo/blob/main/config.py",
-            is_high_value=True,
             found_time=datetime.now()
         ),
         "medium": KeyInfo(
@@ -85,10 +81,8 @@ def create_test_key(severity_level: str = "high") -> KeyInfo:
             api_key="AIzaSyTest1234567890abcdefghijklmnopqrs",
             base_url="https://generativelanguage.googleapis.com",
             model_tier="Gemini-1.5-Pro",
-            balance="Free tier",
             rpm=60,
             source_url="https://github.com/example/repo/blob/main/app.js",
-            is_high_value=False,
             found_time=datetime.now()
         ),
         "low": KeyInfo(
@@ -96,10 +90,8 @@ def create_test_key(severity_level: str = "high") -> KeyInfo:
             api_key="gsk_test1234567890abcdefghijklmnopqrstuvwx",
             base_url="https://api.groq.com",
             model_tier="Llama-3-8B",
-            balance="Quota exceeded",
             rpm=0,
             source_url="https://gist.github.com/user/abc123",
-            is_high_value=False,
             found_time=datetime.now()
         )
     }

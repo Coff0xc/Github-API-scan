@@ -531,16 +531,13 @@ async def optimized_validator_worker(
                     except Exception as notify_error:
                         logger.error(f"[Validator-{worker_id}] 处置通知失败: {notify_error}")
 
-                # UI 反馈。余额和高价值不进入界面。
                 source_short = source_url.rsplit('/', 1)[-1]
                 if status == KeyStatus.VALID:
                     _safe_dashboard(dashboard, "increment_stat", "valid_keys")
                     _safe_dashboard(dashboard, "add_valid_key",
                                     platform=result.platform,
                                     masked_key=masked,
-                                    balance="",
-                                    source=source_short,
-                                    is_high_value=False)
+                                    source=source_short)
                     _safe_dashboard(dashboard, "add_log",
                                     f"✓ 有效! {model_tier or platform.upper()} {masked}",
                                     "VALID")

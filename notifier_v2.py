@@ -76,10 +76,8 @@ class KeyInfo:
     api_key: str
     base_url: str = ""
     model_tier: str = ""        # GPT-4, GPT-3.5, Claude-3, etc.
-    balance: str = ""           # $100.00, unlimited, etc.
     rpm: int = 0                # Rate limit
     source_url: str = ""        # GitHub 来源链接
-    is_high_value: bool = False
     found_time: datetime = field(default_factory=datetime.now)
 
     @property
@@ -91,30 +89,11 @@ class KeyInfo:
 
     @property
     def severity(self) -> Severity:
-        """自动计算严重性级别"""
-        # 解析余额
-        balance_value = 0.0
-        if self.balance:
-            import re
-            match = re.search(r'\$?([\d,]+(?:\.\d+)?)', self.balance)
-            if match:
-                balance_value = float(match.group(1).replace(',', ''))
-
-        # Critical: 高端模型 + 高余额
-        if self.model_tier in ['GPT-4', 'GPT-4-Turbo', 'GPT-4o', 'Claude-3-Opus', 'Claude-3.5-Sonnet']:
-            if balance_value >= 100 or 'unlimited' in self.balance.lower():
-                return Severity.CRITICAL
+        """按模型档位分级。扫描路径不写余额。"""
+        if self.model_tier in (
+            'GPT-4', 'GPT-4-Turbo', 'GPT-4o', 'Claude-3-Opus', 'Claude-3.5-Sonnet',
+        ):
             return Severity.HIGH
-
-        # High: 高端模型或有余额
-        if balance_value >= 10 or self.is_high_value:
-            return Severity.HIGH
-
-        # 余额文本里写了 quota，视为配额耗尽。
-        # 其余情况至少是 medium：扫描现在不写余额和模型档位，
-        # 若落成 low，示例配置的 min_severity: medium 会把处置通知丢掉。
-        if "quota" in (self.balance or "").lower():
-            return Severity.LOW
         return Severity.MEDIUM
 
 
@@ -179,8 +158,6 @@ class DiscordChannel(NotificationChannel):
         # 可选字段
         if key_info.model_tier:
             embed["fields"].append({"name": "模型", "value": key_info.model_tier, "inline": True})
-        if key_info.balance:
-            embed["fields"].append({"name": "余额/状态", "value": key_info.balance, "inline": True})
         if key_info.rpm:
             embed["fields"].append({"name": "RPM", "value": str(key_info.rpm), "inline": True})
         if key_info.base_url:
@@ -267,8 +244,6 @@ class SlackChannel(NotificationChannel):
         details = []
         if key_info.model_tier:
             details.append(f"*模型:* {key_info.model_tier}")
-        if key_info.balance:
-            details.append(f"*余额:* {key_info.balance}")
         if key_info.base_url:
             details.append(f"*Base URL:* {key_info.base_url}")
 
@@ -355,10 +330,6 @@ class TelegramChannel(NotificationChannel):
 
         if key_info.model_tier:
             text += f"\n*模型:* `{key_info.model_tier}`"
-        if key_info.balance:
-            # 转义 Markdown 特殊字符
-            balance_escaped = key_info.balance.replace('.', '\\.').replace('-', '\\-').replace('$', '\\$')
-            text += f"\n*余额:* `{balance_escaped}`"
         if key_info.rpm:
             text += f"\n*RPM:* `{key_info.rpm}`"
         if key_info.base_url:
@@ -448,8 +419,6 @@ class FeishuChannel(NotificationChannel):
         extra_fields = []
         if key_info.model_tier:
             extra_fields.append({"is_short": True, "text": {"tag": "lark_md", "content": f"**模型**\n{key_info.model_tier}"}})
-        if key_info.balance:
-            extra_fields.append({"is_short": True, "text": {"tag": "lark_md", "content": f"**余额**\n{key_info.balance}"}})
 
         if extra_fields:
             card["card"]["elements"].append({"tag": "div", "fields": extra_fields})
@@ -540,8 +509,6 @@ class DingtalkChannel(NotificationChannel):
 
         if key_info.model_tier:
             text += f"\n- **模型:** {key_info.model_tier}"
-        if key_info.balance:
-            text += f"\n- **余额:** {key_info.balance}"
         if key_info.rpm:
             text += f"\n- **RPM:** {key_info.rpm}"
         if key_info.base_url:
@@ -620,8 +587,6 @@ class ServerChanChannel(NotificationChannel):
 
         if key_info.model_tier:
             content += f"\n| 模型 | {key_info.model_tier} |"
-        if key_info.balance:
-            content += f"\n| 余额 | {key_info.balance} |"
         if key_info.source_url:
             content += f"\n\n[查看来源]({key_info.source_url})"
 
@@ -673,8 +638,6 @@ class BarkChannel(NotificationChannel):
 
         if key_info.model_tier:
             body += f"\n模型: {key_info.model_tier}"
-        if key_info.balance:
-            body += f"\n余额: {key_info.balance}"
 
         # Bark API
         url = f"{self.server_url}/{self.device_key}/{title}/{body}"
@@ -977,7 +940,7 @@ class NotifierV2:
         self.daily_stats["by_platform"][key_info.platform] = \
             self.daily_stats["by_platform"].get(key_info.platform, 0) + 1
 
-        if key_info.is_high_value or severity in [Severity.CRITICAL, Severity.HIGH]:
+        if severity in (Severity.CRITICAL, Severity.HIGH):
             self.daily_stats["high_value_keys"].append({
                 "platform": key_info.platform,
                 "key": key_info.masked_key,

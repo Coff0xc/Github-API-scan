@@ -52,14 +52,12 @@ class DashboardStats:
 
 @dataclass
 class ValidKeyRecord:
-    """终端里的一条发现。balance 和 is_high_value 仍接受旧调用，但不展示。"""
+    """终端里的一条发现。"""
     platform: str
     masked_key: str
     source: str
     found_time: str
     status: str = "valid"
-    balance: str = ""
-    is_high_value: bool = False
 
     @property
     def platform_color(self) -> str:
@@ -330,20 +328,16 @@ class Dashboard:
         self,
         platform: str,
         masked_key: str,
-        balance: str = "",
         source: str = "",
-        is_high_value: bool = False,
         status: str = "valid",
     ):
-        """记下一条存活发现。balance 和 is_high_value 被忽略，留给旧调用方。"""
+        """记下一条存活发现。"""
         record = ValidKeyRecord(
             platform=platform,
             masked_key=masked_key,
             source=source,
             found_time=datetime.now().strftime("%H:%M:%S"),
             status=status or "valid",
-            balance=balance,
-            is_high_value=False,
         )
 
         with self._lock:

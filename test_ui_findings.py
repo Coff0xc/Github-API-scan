@@ -10,9 +10,7 @@ def test_terminal_table_is_a_finding_list():
     dashboard.add_valid_key(
         platform="openai",
         masked_key="sk-pro...k9Q2",
-        balance="$100",
         source="acme-labs/billing-api/.env",
-        is_high_value=True,
     )
 
     console = Console(record=True, width=120)
@@ -33,6 +31,16 @@ def test_terminal_table_is_a_finding_list():
     assert "高价值" not in joined_logs
 
 
+def test_valid_key_record_has_no_retired_value_fields():
+    from dataclasses import fields
+    from ui import ValidKeyRecord
+
+    names = {f.name for f in fields(ValidKeyRecord)}
+    for retired in ("is_high_value", "balance", "balance_usd", "value_score"):
+        assert retired not in names
+
+
 if __name__ == "__main__":
     test_terminal_table_is_a_finding_list()
+    test_valid_key_record_has_no_retired_value_fields()
     print("ui findings ok")
