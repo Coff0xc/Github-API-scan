@@ -18,7 +18,7 @@ import aiohttp
 from aiohttp import ClientTimeout
 
 from config import config, COMPILED_KEY_PATTERNS
-from scanner import ScanResult, calculate_entropy, is_test_key, ENTROPY_THRESHOLD
+from scanner import ScanResult, extract_source_keys
 
 
 # Pastebin 配置
@@ -155,41 +155,7 @@ class PastebinScanner:
 
     def _extract_keys(self, content: str, source_url: str) -> List[ScanResult]:
         """从内容中提取 API Key"""
-        results = []
-
-        for platform, pattern in self._key_patterns.items():
-            for match in pattern.finditer(content):
-                api_key = match.group(0)
-
-                # 测试 Key 检测
-                if is_test_key(api_key):
-                    continue
-
-                # 熵值过滤
-                key_body = api_key
-                prefixes = ['sk-proj-', 'sk-ant-', 'sk-', 'AIza', 'hf_', 'gsk_']
-                for prefix in prefixes:
-                    if api_key.startswith(prefix):
-                        key_body = api_key[len(prefix):]
-                        break
-
-                if calculate_entropy(key_body) < ENTROPY_THRESHOLD:
-                    continue
-
-                # 提取上下文
-                start = max(0, match.start() - 200)
-                end = min(len(content), match.end() + 200)
-                context = content[start:end]
-
-                results.append(ScanResult(
-                    platform=platform,
-                    api_key=api_key,
-                    base_url=config.default_base_urls.get(platform, ""),
-                    source_url=source_url,
-                    context=context
-                ))
-
-        return results
+        return extract_source_keys(self._key_patterns, content, source_url)
 
     async def _scan_paste(self, paste: PasteMetadata) -> int:
         """扫描单个 Paste"""

@@ -19,7 +19,7 @@ import aiohttp
 from aiohttp import ClientTimeout
 
 from config import config, COMPILED_KEY_PATTERNS
-from scanner import ScanResult, calculate_entropy, is_test_key, ENTROPY_THRESHOLD
+from scanner import ScanResult, extract_source_keys
 
 
 # SearchCode API
@@ -118,34 +118,13 @@ class SearchCodeScanner:
 
     def _extract_keys(self, code_result: CodeResult) -> List[ScanResult]:
         """从搜索结果提取 Key"""
-        results = []
         content = "\n".join(code_result.lines.values())
-
-        for platform, pattern in self._key_patterns.items():
-            for match in pattern.finditer(content):
-                api_key = match.group(0)
-
-                if is_test_key(api_key):
-                    continue
-
-                key_body = api_key
-                for prefix in ['sk-proj-', 'sk-ant-', 'sk-', 'AIza', 'hf_', 'gsk_']:
-                    if api_key.startswith(prefix):
-                        key_body = api_key[len(prefix):]
-                        break
-
-                if calculate_entropy(key_body) < ENTROPY_THRESHOLD:
-                    continue
-
-                results.append(ScanResult(
-                    platform=platform,
-                    api_key=api_key,
-                    base_url=config.default_base_urls.get(platform, ""),
-                    source_url=code_result.url,
-                    context=content[:500]
-                ))
-
-        return results
+        return extract_source_keys(
+            self._key_patterns,
+            content,
+            code_result.url,
+            context=content[:500],
+        )
 
     async def _scan_keyword(self, keyword: str) -> int:
         """扫描单个关键词"""
