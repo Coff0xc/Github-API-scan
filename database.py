@@ -296,14 +296,31 @@ class Database:
 
         用于验证前检查，避免重复验证已入库的 Key
         """
+        return bool(self.existing_api_keys((api_key,)))
+
+    def existing_api_keys(self, api_keys: Iterable[str]) -> Set[str]:
+        """一次查出已入库的明文 key。"""
+        hashed = {}
+        for api_key in api_keys:
+            if not api_key:
+                continue
+            hashed[vault.hash_key(api_key)] = api_key
+        if not hashed:
+            return set()
+        hashes = tuple(hashed.keys())
+        found = set()
         with self._lock:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute(
-                    "SELECT 1 FROM leaked_keys WHERE key_hash = ? LIMIT 1",
-                    (vault.hash_key(api_key),)
-                )
-                return cursor.fetchone() is not None
+                for offset in range(0, len(hashes), 400):
+                    chunk = hashes[offset:offset + 400]
+                    placeholders = ",".join("?" * len(chunk))
+                    cursor.execute(
+                        f"SELECT key_hash FROM leaked_keys WHERE key_hash IN ({placeholders})",
+                        chunk,
+                    )
+                    found.update(row[0] for row in cursor.fetchall())
+        return {hashed[key_hash] for key_hash in found if key_hash in hashed}
     
     def insert_key(self, key: LeakedKey) -> bool:
         """插入新的泄露密钥。已存在返回 False。"""
