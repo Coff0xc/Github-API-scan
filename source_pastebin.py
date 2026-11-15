@@ -18,7 +18,7 @@ import aiohttp
 from aiohttp import ClientTimeout
 
 from config import config, COMPILED_KEY_PATTERNS
-from scanner import ScanResult, extract_source_keys
+from scanner import ScanResult, extract_source_keys, load_source_ids, remember_source_id
 
 
 # Pastebin 配置
@@ -66,7 +66,7 @@ class PastebinScanner:
         self.db = db
 
         # 已处理的 Paste Key
-        self._processed_pastes: Set[str] = set()
+        self._processed_pastes: Set[str] = load_source_ids(db, "paste:")
         self._processed_lock = threading.Lock()
 
         self._key_patterns = COMPILED_KEY_PATTERNS
@@ -166,6 +166,7 @@ class PastebinScanner:
             if paste.key in self._processed_pastes:
                 return 0
             self._processed_pastes.add(paste.key)
+        remember_source_id(self.db, "paste:", paste.key)
 
         # 获取内容
         content = await self._fetch_paste_content(paste.key)

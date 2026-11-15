@@ -19,7 +19,7 @@ import aiohttp
 from aiohttp import ClientTimeout
 
 from config import config, COMPILED_KEY_PATTERNS
-from scanner import ScanResult, extract_source_keys
+from scanner import ScanResult, extract_source_keys, load_source_ids, remember_source_id
 
 
 # GitLab API
@@ -62,7 +62,7 @@ class GitLabScanner:
         self.dashboard = dashboard
         self.db = db
 
-        self._processed_ids: Set[int] = set()
+        self._processed_ids: Set[str] = load_source_ids(db, "gitlab:")
         self._processed_lock = threading.Lock()
 
         self._key_patterns = COMPILED_KEY_PATTERNS
@@ -128,10 +128,12 @@ class GitLabScanner:
 
     async def _scan_snippet(self, snippet: SnippetInfo) -> int:
         """扫描单个 Snippet"""
+        token = str(snippet.id)
         with self._processed_lock:
-            if snippet.id in self._processed_ids:
+            if token in self._processed_ids:
                 return 0
-            self._processed_ids.add(snippet.id)
+            self._processed_ids.add(token)
+        remember_source_id(self.db, "gitlab:", token)
 
         content = await self._fetch_content(snippet.raw_url)
         if not content:

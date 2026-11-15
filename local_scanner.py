@@ -17,7 +17,6 @@
 """
 
 import os
-import re
 import queue
 import subprocess
 import threading
@@ -26,13 +25,11 @@ from typing import List, Optional, Set
 
 from loguru import logger
 
-from config import config, COMPILED_KEY_PATTERNS, COMPILED_BASE_URL_PATTERNS
+from config import config, COMPILED_KEY_PATTERNS
 from database import Database
 from scanner import (
-    ScanResult, content_variants, select_key_matches, should_skip_file,
-    TEST_KEY_PATTERNS, ENTROPY_THRESHOLD, mask_key,
+    ScanResult, extract_keys, should_skip_file, mask_key,
 )
-from utils import calculate_entropy
 
 
 class LocalScanner:
@@ -58,7 +55,6 @@ class LocalScanner:
         self.db = db if db is not None else Database(config.db_path)
 
         self._patterns = COMPILED_KEY_PATTERNS
-        self._base_url_patterns = COMPILED_BASE_URL_PATTERNS
         self._processed: Set[str] = set()
         self._seen_blobs: Set[str] = set()
         self._pending_blobs: List[str] = []
@@ -301,65 +297,19 @@ class LocalScanner:
     # 提取逻辑（与 scanner.py 管线同源：BPE 解码 + 正则 + 熵/测试词过滤）
     # ------------------------------------------------------------------
     def _extract(self, content: str, source_url: str):
-        for variant in content_variants(content):
-            for start, end, platform, api_key in select_key_matches(self._patterns, variant):
-                if self.stop_event.is_set():
-                    return
-
-                with self._lock:
-                    if api_key in self._processed:
-                        continue
-                    self._processed.add(api_key)
-
-                if self._looks_like_test_key(api_key):
-                    self.stats["skipped"] += 1
+        for result in extract_keys(self._patterns, content, source_url, db=self.db):
+            if self.stop_event.is_set():
+                return
+            with self._lock:
+                if result.api_key in self._processed:
                     continue
-
-                if self.db.key_exists(api_key):
-                    self.stats["skipped"] += 1
-                    continue
-
-                context = variant[max(0, start - 300):end + 300]
-                base_url = self._extract_base_url(context)
-
-                result = ScanResult(
-                    platform=platform,
-                    api_key=api_key,
-                    base_url=base_url,
-                    source_url=source_url,
-                    is_relay=bool(base_url and base_url not in config.default_base_urls.values()),
-                    context=context,
-                )
-                self.stats["found"] += 1
-                self._log(f"[LOCAL] {platform} {mask_key(api_key)} @ {source_url}", "FOUND")
-                try:
-                    self.result_queue.put(result, timeout=5)
-                except queue.Full:
-                    self._log("结果队列已满，本地结果被丢弃", "WARN")
-
-    def _looks_like_test_key(self, api_key: str) -> bool:
-        """熵 + 测试词过滤（与 scanner 管线同标准）"""
-        key_lower = api_key.lower()
-        if any(w in key_lower for w in TEST_KEY_PATTERNS):
-            return True
-        stripped = re.sub(r'^(sk-proj-|sk-svcacct-|sk-ant-api\d+-|sk-ant-|sk-|AIza|hf_|gsk_|xai-|llama-|moonshot-|zhipu-|glm-|baichuan-|minimax-|co-|volc-|r8_|pplx-|fw_|wr-|ff-|yi-|step-|sensetime-|xf-|tiangong-|modal-|pk-|sk-or-v1-|sk_live_|rk_live_|ghp_|gho_|ghu_|ghs_|ghr_|xox[bpars]-|dop_v1_|shpat_|lin_api_|secret_|glpat-)', '', api_key)
-        try:
-            if calculate_entropy(stripped) < ENTROPY_THRESHOLD:
-                return True
-        except Exception:
-            pass
-        return False
-
-    def _extract_base_url(self, context: str) -> str:
-        """从上下文提取 base_url。赋值形式的模式排在通用 URL 前面。"""
-        for pattern in self._base_url_patterns:
-            match = pattern.search(context)
-            if not match:
-                continue
-            url = match.group(1) if match.groups() else match.group(0)
-            if url.startswith("http"):
-                return url.rstrip("/")
-        return ""
+                self._processed.add(result.api_key)
+            self.stats["found"] += 1
+            self._log(f"[LOCAL] {result.platform} {mask_key(result.api_key)} @ {source_url}", "FOUND")
+            try:
+                self.result_queue.put(result, timeout=5)
+            except queue.Full:
+                self._log("结果队列已满，本地结果被丢弃", "WARN")
 
     def _log(self, message: str, level: str = "INFO"):
         if self.dashboard:

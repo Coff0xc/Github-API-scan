@@ -18,7 +18,7 @@ from aiohttp import ClientTimeout
 from github import Github, GithubException
 
 from config import config, COMPILED_KEY_PATTERNS
-from scanner import ScanResult, extract_source_keys
+from scanner import ScanResult, extract_source_keys, load_source_ids, remember_source_id
 
 
 # 并发配置
@@ -79,7 +79,7 @@ class GistScanner:
         self._init_github_clients()
 
         # 已处理的 Gist ID
-        self._processed_gists: Set[str] = set()
+        self._processed_gists: Set[str] = load_source_ids(db, "gist:")
         self._processed_lock = threading.Lock()
 
         self._key_patterns = COMPILED_KEY_PATTERNS
@@ -176,6 +176,7 @@ class GistScanner:
                         if gist_id in self._processed_gists:
                             continue
                         self._processed_gists.add(gist_id)
+                    remember_source_id(self.db, "gist:", gist_id)
 
                     # 遍历 Gist 中的文件
                     for filename, file_info in gist.files.items():

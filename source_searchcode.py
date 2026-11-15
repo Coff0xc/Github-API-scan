@@ -19,7 +19,7 @@ import aiohttp
 from aiohttp import ClientTimeout
 
 from config import config, COMPILED_KEY_PATTERNS
-from scanner import ScanResult, extract_source_keys
+from scanner import ScanResult, extract_source_keys, load_source_ids, remember_source_id
 
 
 # SearchCode API
@@ -71,7 +71,7 @@ class SearchCodeScanner:
         self.dashboard = dashboard
         self.db = db
 
-        self._processed_ids: Set[str] = set()
+        self._processed_ids: Set[str] = load_source_ids(db, "searchcode:")
         self._processed_lock = threading.Lock()
 
         self._key_patterns = COMPILED_KEY_PATTERNS
@@ -125,7 +125,6 @@ class SearchCodeScanner:
             self._key_patterns,
             content,
             code_result.url,
-            context=content[:500],
             db=self.db,
         )
 
@@ -147,6 +146,7 @@ class SearchCodeScanner:
                     if code_result.id in self._processed_ids:
                         continue
                     self._processed_ids.add(code_result.id)
+                remember_source_id(self.db, "searchcode:", code_result.id)
 
                 self.stats["searched"] += 1
                 keys = self._extract_keys(code_result)
