@@ -167,6 +167,30 @@ def test_github_scanner_requires_sync_database():
     raise AssertionError("GitHubScanner must reject AsyncDatabase")
 
 
+def test_github_scanner_preloads_scanned_blob_shas():
+    from scanner import GitHubScanner
+    import queue
+    import threading
+    from database import Database
+
+    sha = "a" * 40
+    db = Database(":memory:")
+    assert db.mark_blob_scanned(sha)
+    scanner = GitHubScanner(queue.Queue(), db, threading.Event())
+    assert sha in scanner._processed_shas
+
+    original = scanner.db.is_blob_scanned
+
+    def boom(file_sha):
+        if file_sha == sha:
+            raise AssertionError("preloaded SHA must not hit the database")
+        return original(file_sha)
+
+    scanner.db.is_blob_scanned = boom
+    assert scanner._is_sha_processed(sha) is True
+    assert scanner._is_sha_processed("b" * 40) is False
+
+
 def test_github_extract_keeps_new_key_with_sync_database():
     from scanner import GitHubScanner
     import queue
@@ -193,5 +217,6 @@ if __name__ == "__main__":
     test_relay_url_policy_matches_host_rules()
     test_key_patterns_compiled_once_without_azure()
     test_github_scanner_requires_sync_database()
+    test_github_scanner_preloads_scanned_blob_shas()
     test_github_extract_keeps_new_key_with_sync_database()
     print("boundary fixes ok")

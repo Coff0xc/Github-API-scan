@@ -468,15 +468,14 @@ class GitHubScanner:
             return self._current_client_index
     
     def _preload_scanned_shas(self):
-        """
-        从数据库预加载已扫描的 SHA 到内存缓存
-        
-        这样可以避免每次都查询数据库，提升性能
-        """
+        """从数据库把已扫描 SHA 读进内存集，避免每个文件再查库。"""
         try:
-            count = self.db.get_scanned_blob_count()
-            if count > 0:
-                self._log(f"已从数据库加载 {count} 个已扫描文件 SHA", "INFO")
+            shas = self.db.load_scanned_blob_shas()
+            if not shas:
+                return
+            with self._sha_lock:
+                self._processed_shas.update(shas)
+            self._log(f"已从数据库加载 {len(shas)} 个已扫描文件 SHA", "INFO")
         except Exception as e:
             self._log(f"预加载 SHA 失败: {e}", "WARN")
     
