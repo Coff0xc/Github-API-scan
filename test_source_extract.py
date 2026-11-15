@@ -110,6 +110,56 @@ def test_public_scanners_skip_keys_already_in_db():
         assert found == []
 
 
+def test_realtime_persists_and_preloads_commit_shas():
+    from database import Database
+
+    sha = "c" * 40
+    db = Database(":memory:")
+    assert db.mark_blob_scanned(sha)
+    first = RealtimeScanner(queue.Queue(), threading.Event(), db=db)
+    assert sha in first._processed_shas
+    assert first._sha_seen(sha) is True
+
+    other = "d" * 40
+    first._remember_sha(other)
+    assert db.is_blob_scanned(other)
+
+    second = RealtimeScanner(queue.Queue(), threading.Event(), db=db)
+    assert other in second._processed_shas
+    assert second._sha_seen("") is True
+
+
+async def test_realtime_skips_fetch_for_persisted_sha():
+    from database import Database
+
+    sha = "e" * 40
+    db = Database(":memory:")
+    db.mark_blob_scanned(sha)
+    scanner = RealtimeScanner(queue.Queue(), threading.Event(), db=db)
+    fetched = []
+
+    async def fake_fetch(repo, commit_sha):
+        fetched.append(commit_sha)
+        return "readme update"
+
+    scanner._fetch_commit_content = fake_fetch
+    found = await scanner._process_push_event({
+        "repo": {"name": "acme/app"},
+        "payload": {"commits": [{"sha": sha, "message": "leak"}]},
+    })
+    assert found == 0
+    assert fetched == []
+
+    new_sha = "f" * 40
+    found = await scanner._process_push_event({
+        "repo": {"name": "acme/app"},
+        "payload": {"commits": [{"sha": new_sha, "message": "docs"}]},
+    })
+    assert found == 0
+    assert fetched == [new_sha]
+    assert db.is_blob_scanned(new_sha)
+
+
 def test_extract_source_keys_does_not_duplicate_plain_and_encoded():
     key = "sk-proj-Qw9Rt8Yu7Ip6Lk5Jh4Gf3Ds2Az1Xc0Vb"
     encoded = "sk-proj-Qw9%52t8Yu7Ip6Lk5Jh4Gf3Ds2Az1Xc0Vb"

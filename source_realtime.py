@@ -58,6 +58,7 @@ class RealtimeScanner:
 
         self._processed_shas: Set[str] = set()
         self._processed_lock = threading.Lock()
+        self._preload_shas()
 
         self._key_patterns = {
             name: pattern
@@ -145,6 +146,43 @@ class RealtimeScanner:
         except Exception:
             return None
 
+    def _preload_shas(self):
+        if self.db is None:
+            return
+        try:
+            shas = self.db.load_scanned_blob_shas()
+            if not shas:
+                return
+            with self._processed_lock:
+                self._processed_shas.update(shas)
+            self._log(f"已从数据库加载 {len(shas)} 个已扫描 SHA", "INFO")
+        except Exception as exc:
+            self._log(f"预加载 SHA 失败: {exc}", "WARN")
+
+    def _sha_seen(self, sha: str) -> bool:
+        if not sha:
+            return True
+        with self._processed_lock:
+            if sha in self._processed_shas:
+                return True
+        if self.db is not None and self.db.is_blob_scanned(sha):
+            with self._processed_lock:
+                self._processed_shas.add(sha)
+            return True
+        return False
+
+    def _remember_sha(self, sha: str) -> None:
+        if not sha:
+            return
+        with self._processed_lock:
+            self._processed_shas.add(sha)
+        if self.db is None:
+            return
+        try:
+            self.db.mark_blob_scanned(sha)
+        except Exception as exc:
+            self._log(f"写入已扫描 SHA 失败: {exc}", "WARN")
+
     def _quick_filter(self, content: str) -> bool:
         """快速过滤 - 检查是否包含高价值关键词"""
         content_lower = content.lower()
@@ -166,24 +204,15 @@ class RealtimeScanner:
         for commit in commits:
             sha = commit.get("sha", "")
             message = commit.get("message", "")
+            if self._sha_seen(sha):
+                continue
 
-            with self._processed_lock:
-                if sha in self._processed_shas:
-                    continue
-                self._processed_shas.add(sha)
-
-            # 快速过滤 commit message
-            if not self._quick_filter(message):
-                # 获取完整 patch
-                content = await self._fetch_commit_content(repo, sha)
-                if not content:
-                    continue
-                if not self._quick_filter(content):
-                    continue
-            else:
-                content = await self._fetch_commit_content(repo, sha)
-                if not content:
-                    continue
+            content = await self._fetch_commit_content(repo, sha)
+            if not content:
+                continue
+            self._remember_sha(sha)
+            if not self._quick_filter(message) and not self._quick_filter(content):
+                continue
 
             self.stats["commits_scanned"] += 1
             source_url = f"https://github.com/{repo}/commit/{sha}"
