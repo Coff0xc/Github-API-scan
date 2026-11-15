@@ -429,6 +429,7 @@ def run_local_scan(
     init_loop = _asyncio.new_event_loop()
     try:
         init_loop.run_until_complete(async_db.init())
+        init_loop.run_until_complete(async_db.close())
     finally:
         init_loop.close()
 
@@ -475,10 +476,5 @@ def run_local_scan(
         stop_event.set()
         for thread in validator_threads:
             thread.join(timeout=5)
-        close_loop = _asyncio.new_event_loop()
-        try:
-            close_loop.run_until_complete(async_db.close())
-        finally:
-            close_loop.close()
 
     return db.get_stats()

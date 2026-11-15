@@ -8,32 +8,47 @@
 """
 
 import asyncio
+import threading
 import aiosqlite
 from datetime import datetime
-from typing import Optional, List, Dict, Any, Set
+from typing import Optional, List, Dict, Any, Set, Tuple
 from loguru import logger
 
 from database import LeakedKey, KeyStatus
 from key_vault import vault
 from config import config as app_config
 
+_CLAIMS: Dict[str, Tuple[threading.Lock, Set[str]]] = {}
+_CLAIMS_GUARD = threading.Lock()
+
+
+def _shared_claims(db_path: str) -> Tuple[threading.Lock, Set[str]]:
+    with _CLAIMS_GUARD:
+        if db_path not in _CLAIMS:
+            _CLAIMS[db_path] = (threading.Lock(), set())
+        return _CLAIMS[db_path]
+
 
 class AsyncDatabase:
-    """异步数据库。一条连接走完全程，验证结果一次写入。"""
+    """异步数据库。连接绑在当前事件循环上，验证结果一次写入。"""
 
     def __init__(self, db_path: str = "leaked_keys.db"):
         self.db_path = db_path
         self._conn: Optional[aiosqlite.Connection] = None
-        self._conn_lock = asyncio.Lock()
+        self._conn_lock: Optional[asyncio.Lock] = None
         self._write_queue: List[LeakedKey] = []
-        self._pending_hashes: Set[str] = set()
-        self._queue_lock = asyncio.Lock()
+        self._claim_lock, self._pending_hashes = _shared_claims(db_path)
+        self._queue_lock: Optional[asyncio.Lock] = None
         self._batch_size = app_config.db_batch_size
         self._flush_interval = app_config.db_flush_interval
         self._flush_task: Optional[asyncio.Task] = None
 
-    async def init(self):
-        """初始化数据库并保持一条连接。"""
+    async def init(self, *, start_flusher: bool = True):
+        """在当前事件循环上打开连接并确保表结构。"""
+        if self._conn is not None:
+            return
+        self._conn_lock = asyncio.Lock()
+        self._queue_lock = asyncio.Lock()
         self._conn = await aiosqlite.connect(self.db_path)
         self._conn.row_factory = aiosqlite.Row
         await self._conn.execute("PRAGMA journal_mode=WAL")
@@ -102,8 +117,15 @@ class AsyncDatabase:
         """)
         await db.commit()
 
-        self._flush_task = asyncio.create_task(self._periodic_flush())
+        if start_flusher:
+            self._flush_task = asyncio.create_task(self._periodic_flush())
         logger.info(f"异步数据库初始化完成: {self.db_path}")
+
+    async def connect(self) -> "AsyncDatabase":
+        """在当前事件循环上打开一条新连接，与同路径实例共享 claim 集合。"""
+        bound = AsyncDatabase(self.db_path)
+        await bound.init(start_flusher=False)
+        return bound
 
     async def close(self):
         """关闭数据库"""
@@ -140,13 +162,15 @@ class AsyncDatabase:
 
     async def _flush_queue(self):
         """批量写入队列中的数据"""
+        if self._queue_lock is None:
+            return
         async with self._queue_lock:
             if not self._write_queue:
                 return
             keys_to_write = self._write_queue[:]
             self._write_queue.clear()
 
-        if not keys_to_write or self._conn is None:
+        if not keys_to_write or self._conn is None or self._conn_lock is None:
             return
 
         async with self._conn_lock:
@@ -160,7 +184,8 @@ class AsyncDatabase:
                         """,
                         self._row_values(key),
                     )
-                    self._pending_hashes.discard(vault.hash_key(key.api_key))
+                    with self._claim_lock:
+                        self._pending_hashes.discard(vault.hash_key(key.api_key))
                 except Exception as e:
                     logger.debug(f"批量写入异常: {e}")
             await self._conn.commit()
@@ -169,9 +194,12 @@ class AsyncDatabase:
 
     async def queue_insert(self, key: LeakedKey):
         """将 Key 加入写入队列"""
+        if self._queue_lock is None:
+            raise RuntimeError("AsyncDatabase.init() was not called")
         key_hash = vault.hash_key(key.api_key)
-        async with self._queue_lock:
+        with self._claim_lock:
             self._pending_hashes.add(key_hash)
+        async with self._queue_lock:
             self._write_queue.append(key)
             if len(self._write_queue) >= self._batch_size:
                 asyncio.create_task(self._flush_queue())
@@ -182,8 +210,11 @@ class AsyncDatabase:
 
     async def claim_key(self, api_key: str) -> bool:
         """本轮是否该验证这条密钥。已入库或正在处理的返回 False。"""
+        if self._conn is None:
+            raise RuntimeError("AsyncDatabase.init() was not called")
         key_hash = vault.hash_key(api_key)
-        async with self._conn_lock:
+        self._claim_lock.acquire()
+        try:
             if key_hash in self._pending_hashes:
                 return False
             async with self._conn.execute(
@@ -194,13 +225,16 @@ class AsyncDatabase:
                     return False
             self._pending_hashes.add(key_hash)
             return True
+        finally:
+            self._claim_lock.release()
 
     async def release_claim(self, api_key: str) -> None:
-        self._pending_hashes.discard(vault.hash_key(api_key))
+        with self._claim_lock:
+            self._pending_hashes.discard(vault.hash_key(api_key))
 
     async def upsert_finding(self, key: LeakedKey) -> None:
         """验证结束后一次写入：插入或按指纹更新状态。"""
-        if self._conn is None:
+        if self._conn is None or self._conn_lock is None:
             raise RuntimeError("AsyncDatabase.init() was not called")
         status = key.status
         verified_time = datetime.now().isoformat()
@@ -222,14 +256,16 @@ class AsyncDatabase:
                 values + (verified_time,),
             )
             await self._conn.commit()
+        with self._claim_lock:
             self._pending_hashes.discard(values[2])
 
     async def key_exists(self, api_key: str) -> bool:
         """检查 Key 是否存在（按 key_hash 指纹查询，含未落盘的在途项）"""
         key_hash = vault.hash_key(api_key)
-        if key_hash in self._pending_hashes:
-            return True
-        if self._conn is None:
+        with self._claim_lock:
+            if key_hash in self._pending_hashes:
+                return True
+        if self._conn is None or self._conn_lock is None:
             return False
         async with self._conn_lock:
             async with self._conn.execute(
@@ -240,6 +276,8 @@ class AsyncDatabase:
 
     async def is_blob_scanned(self, file_sha: str) -> bool:
         """检查文件是否已扫描"""
+        if self._conn is None or self._conn_lock is None:
+            raise RuntimeError("AsyncDatabase.init() was not called")
         async with self._conn_lock:
             async with self._conn.execute(
                 "SELECT 1 FROM scanned_blobs WHERE file_sha = ? LIMIT 1",
@@ -249,6 +287,8 @@ class AsyncDatabase:
 
     async def mark_blob_scanned(self, file_sha: str) -> bool:
         """标记文件为已扫描"""
+        if self._conn is None or self._conn_lock is None:
+            return False
         try:
             async with self._conn_lock:
                 await self._conn.execute(
@@ -268,6 +308,8 @@ class AsyncDatabase:
         rpm: int = 0,
     ):
         """更新状态、模型档位和 RPM。"""
+        if self._conn is None or self._conn_lock is None:
+            raise RuntimeError("AsyncDatabase.init() was not called")
         async with self._conn_lock:
             await self._conn.execute(
                 """
@@ -284,6 +326,8 @@ class AsyncDatabase:
 
     async def get_stats(self) -> Dict[str, Any]:
         """获取统计信息"""
+        if self._conn is None or self._conn_lock is None:
+            raise RuntimeError("AsyncDatabase.init() was not called")
         async with self._conn_lock:
             async with self._conn.execute("SELECT COUNT(*) FROM leaked_keys") as cursor:
                 total = (await cursor.fetchone())[0]

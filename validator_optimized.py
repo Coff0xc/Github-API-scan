@@ -469,7 +469,8 @@ async def optimized_validator_worker(
     """
     from validator import validate_key_async, CircuitBreaker
 
-    validator = OptimizedAsyncValidator(async_db, dashboard, cache_config)
+    db = await async_db.connect()
+    validator = OptimizedAsyncValidator(db, dashboard, cache_config)
     await validator.init_cache()
     circuit_breaker = CircuitBreaker()
     processed_count = 0
@@ -490,7 +491,7 @@ async def optimized_validator_worker(
                 masked = mask_key(result.api_key)
                 platform = (result.platform or "openai").lower()
 
-                if not await async_db.claim_key(result.api_key):
+                if not await db.claim_key(result.api_key):
                     logger.debug(f"[Validator-{worker_id}] Key 已存在,跳过: {masked}")
                     _safe_dashboard(dashboard, "increment_stat", "skipped_duplicate")
                     continue
@@ -509,7 +510,7 @@ async def optimized_validator_worker(
                     )
 
                 status_value = status.value if isinstance(status, KeyStatus) else status
-                await async_db.upsert_finding(LeakedKey(
+                await db.upsert_finding(LeakedKey(
                     platform=result.platform,
                     api_key=result.api_key,
                     base_url=result.base_url or "",
@@ -525,7 +526,7 @@ async def optimized_validator_worker(
                     try:
                         from notify_integration import disclose_finding
                         await disclose_finding(
-                            async_db.db_path, result.platform, result.api_key, source_url,
+                            db.db_path, result.platform, result.api_key, source_url,
                         )
                     except Exception as notify_error:
                         logger.error(f"[Validator-{worker_id}] 处置通知失败: {notify_error}")
@@ -554,7 +555,7 @@ async def optimized_validator_worker(
 
             except Exception as e:
                 try:
-                    await async_db.release_claim(result.api_key)
+                    await db.release_claim(result.api_key)
                 except Exception:
                     pass
                 logger.error(f"[Validator-{worker_id}] 验证异常: {e}")
@@ -563,6 +564,7 @@ async def optimized_validator_worker(
     except asyncio.CancelledError:
         logger.info(f"[Validator-{worker_id}] 收到取消信号")
     finally:
+        await db.close()
         logger.info(f"[Validator-{worker_id}] 验证器停止,共处理 {processed_count} 个 Key")
 
 
@@ -579,7 +581,7 @@ def start_validators(
 
     Args:
         result_queue: asyncio.Queue 或 queue.Queue 扫描结果队列
-        async_db: AsyncDatabase 异步数据库
+        async_db: AsyncDatabase，每个 worker 在本线程事件循环上 connect()
         stop_event: threading.Event 停止信号
         dashboard: Dashboard UI 实例
         num_workers: 验证器线程数

@@ -4,6 +4,7 @@ import asyncio
 import os
 import sqlite3
 import tempfile
+import threading
 
 from database import Database
 from scanner import ScanResult
@@ -202,6 +203,59 @@ def test_queued_insert_must_flush_before_status_update():
     asyncio.run(run())
 
 
+def test_connect_upserts_after_parent_loop_closed():
+    """worker 在本线程 loop 上 connect，不复用已关闭 loop 上的连接。"""
+    from async_database import AsyncDatabase
+
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as root:
+        path = os.path.join(root, "keys.db")
+        parent = AsyncDatabase(path)
+        asyncio.run(parent.init())
+        asyncio.run(parent.close())
+
+        async def worker():
+            db = await parent.connect()
+            assert await db.claim_key(KEY) is True
+            key = _leaked_key("gemini", KEY)
+            key.status = KeyStatus.INVALID.value
+            await db.upsert_finding(key)
+            await db.close()
+
+        asyncio.run(worker())
+        with sqlite3.connect(path) as conn:
+            row = conn.execute("SELECT status FROM leaked_keys").fetchone()
+        assert row == ("invalid",)
+
+
+def test_two_loops_claim_same_key_once():
+    from async_database import AsyncDatabase
+
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as root:
+        path = os.path.join(root, "keys.db")
+        parent = AsyncDatabase(path)
+        asyncio.run(parent.init())
+        asyncio.run(parent.close())
+
+        barrier = threading.Barrier(2)
+        outcomes = []
+
+        def run():
+            async def worker():
+                db = await parent.connect()
+                barrier.wait()
+                outcomes.append(await db.claim_key(KEY))
+                await db.close()
+
+            asyncio.run(worker())
+
+        threads = [threading.Thread(target=run) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        assert sorted(outcomes) == [False, True]
+
+
 def _leaked_key(platform, api_key):
     from database import LeakedKey
     from datetime import datetime
@@ -223,4 +277,6 @@ if __name__ == "__main__":
     test_platform_checks_do_not_flag_high_value()
     test_claim_then_upsert_writes_final_status_once()
     test_queued_insert_must_flush_before_status_update()
+    test_connect_upserts_after_parent_loop_closed()
+    test_two_loops_claim_same_key_once()
     print("process result ok")
