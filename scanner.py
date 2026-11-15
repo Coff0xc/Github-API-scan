@@ -9,7 +9,6 @@
 5. Azure 特殊识别
 """
 
-import re
 import os
 import sys
 import time
@@ -28,11 +27,13 @@ from aiohttp import ClientTimeout, TCPConnector
 from github import Github, GithubException, RateLimitExceededException
 
 from config import (
-    config, REGEX_PATTERNS, BASE_URL_PATTERNS,
-    AZURE_URL_PATTERN, AZURE_CONTEXT_KEYWORDS, URL_PRIORITY_KEYWORDS,
+    config,
+    AZURE_CONTEXT_KEYWORDS, URL_PRIORITY_KEYWORDS,
     COMPILED_KEY_PATTERNS, COMPILED_BASE_URL_PATTERNS, COMPILED_AZURE_URL_PATTERN,
+    BARE_PLATFORM_HINTS,
+    COMPILED_PREFIXED_UNION, COMPILED_BARE_PATTERNS,
 )
-from database import Database, LeakedKey, KeyStatus
+from database import Database
 
 
 # ============================================================================
@@ -300,10 +301,20 @@ def content_variants(text: str):
 
 
 def select_key_matches(patterns, text):
-    """同一段文本里，被更长命中包住的短命中不再单独留下。"""
+    """带前缀平台一次并查；无前缀平台要上下文提示。被更长命中包住的短命中丢掉。"""
     found = []
-    for platform, pattern in patterns.items():
-        if platform == "azure":
+    allowed = patterns
+    text_lower = text.lower()
+    for match in COMPILED_PREFIXED_UNION.finditer(text):
+        platform = match.lastgroup
+        if platform is None or platform not in allowed:
+            continue
+        found.append((match.start(), match.end(), platform, match.group(platform)))
+    for platform, pattern in COMPILED_BARE_PATTERNS.items():
+        if platform not in allowed and platform != "azure":
+            continue
+        hints = BARE_PLATFORM_HINTS.get(platform, ())
+        if hints and not any(hint in text_lower for hint in hints):
             continue
         for match in pattern.finditer(text):
             found.append((match.start(), match.end(), platform, match.group(0)))
@@ -319,7 +330,180 @@ def select_key_matches(patterns, text):
     return chosen
 
 
-_KEY_BODY_PREFIXES = ('sk-proj-', 'sk-ant-', 'sk-', 'AIza', 'hf_', 'gsk_')
+def collect_key_matches(patterns, content):
+    """所有解码变体上的命中，丢掉作为更长 key 子串的碎片。"""
+    by_key = {}
+    for variant in content_variants(content):
+        for start, end, platform, api_key in select_key_matches(patterns, variant):
+            prev = by_key.get(api_key)
+            if prev is None or (end - start) > (prev[1] - prev[0]):
+                by_key[api_key] = (start, end, platform, api_key, variant)
+    kept = []
+    for api_key in sorted(by_key, key=len, reverse=True):
+        if any(api_key != other and api_key in other for other in kept):
+            continue
+        kept.append(api_key)
+    return [by_key[api_key] for api_key in kept]
+
+
+_KEY_BODY_PREFIXES = (
+    'sk-proj-', 'sk-svcacct-', 'sk-ant-api03-', 'sk-ant-', 'sk-or-v1-',
+    'sk-', 'AIza', 'hf_', 'gsk_', 'xai-', 'llama-', 'moonshot-',
+)
+
+_FAKE_KEY_MARKERS = (
+    'your_api_key', 'your-api-key', 'api_key_here',
+    'insert_key', 'replace_me', 'placeholder',
+    'xxxxxxxx', 'yyyyyyyy', '12345678', 'abcdefgh',
+    'test1234', 'demo1234', 'sample12',
+)
+
+
+def _key_body(api_key: str) -> str:
+    for prefix in _KEY_BODY_PREFIXES:
+        if api_key.startswith(prefix):
+            return api_key[len(prefix):]
+    return api_key
+
+
+def _has_sequential_chars(s: str, min_len: int = 6) -> bool:
+    if len(s) < min_len:
+        return False
+    count = 1
+    for i in range(1, len(s)):
+        if abs(ord(s[i]) - ord(s[i - 1])) == 1:
+            count += 1
+            if count >= min_len:
+                return True
+        else:
+            count = 1
+    return False
+
+
+def should_drop_candidate(api_key: str) -> bool:
+    if is_test_key(api_key):
+        return True
+    body = _key_body(api_key)
+    if calculate_entropy(body) < ENTROPY_THRESHOLD:
+        return True
+    if len(set(body)) < 5:
+        return True
+    lowered = api_key.lower()
+    if any(marker in lowered for marker in _FAKE_KEY_MARKERS):
+        return True
+    return _has_sequential_chars(body, 6)
+
+
+def pair_base_url(context: str, platform: str) -> tuple:
+    """邻近赋值行优先。保留路径（含 /v1）。"""
+    default = config.default_base_urls.get(platform, "")
+    if not context:
+        return default, False
+    context_lower = context.lower()
+    if any(kw.lower() in context_lower for kw in AZURE_CONTEXT_KEYWORDS):
+        azure_hit = COMPILED_AZURE_URL_PATTERN.search(context)
+        if azure_hit:
+            return azure_hit.group(0), False
+    ranked = []
+    for index, pattern in enumerate(COMPILED_BASE_URL_PATTERNS):
+        for match in pattern.finditer(context):
+            url = match.group(1) if match.lastindex else match.group(0)
+            url = url.strip().rstrip('\'"')
+            if not url.startswith("http"):
+                continue
+            if "github.com" in url or "githubusercontent" in url:
+                continue
+            if len(url) < 10:
+                continue
+            url_lower = url.lower()
+            if index > 0 and any(domain in url_lower for domain in INVALID_BASE_URL_DOMAINS):
+                continue
+            priority = 20 if index == 0 else 0
+            for relay_domain in KNOWN_RELAY_DOMAINS:
+                if relay_domain in url_lower:
+                    priority += 5
+                    break
+            for keyword in URL_PRIORITY_KEYWORDS:
+                if keyword in url_lower:
+                    priority += 1
+            ranked.append((url, priority))
+    if not ranked:
+        return default, False
+    ranked.sort(key=lambda item: item[1], reverse=True)
+    best = ranked[0][0].rstrip("/")
+    is_relay = "openai.com" not in best and "azure.com" not in best
+    return best, is_relay
+
+
+def extract_keys(
+    patterns,
+    content: str,
+    source_url: str,
+    *,
+    context_pad: int = 300,
+    db=None,
+) -> List['ScanResult']:
+    """统一提取：解码、并查、跨变体去碎片、活体验证前过滤、配对 base_url。"""
+    hits = collect_key_matches(patterns, content)
+    if not hits:
+        return []
+    existing = set()
+    if db is not None:
+        existing = db.existing_api_keys(item[3] for item in hits)
+    results = []
+    seen = set()
+    for start, end, platform, api_key, variant in hits:
+        if api_key in seen or api_key in existing:
+            continue
+        if should_drop_candidate(api_key):
+            seen.add(api_key)
+            continue
+        ctx_start = max(0, start - context_pad)
+        ctx_end = min(len(variant), end + context_pad)
+        ctx = variant[ctx_start:ctx_end]
+        base_url, is_relay = pair_base_url(ctx, platform)
+        is_azure = platform == "azure" or (
+            any(kw.lower() in ctx.lower() for kw in AZURE_CONTEXT_KEYWORDS)
+            and bool(COMPILED_AZURE_URL_PATTERN.search(ctx))
+        )
+        if is_azure:
+            endpoint = COMPILED_AZURE_URL_PATTERN.search(ctx)
+            base_url = endpoint.group(0) if endpoint else ""
+            is_relay = False
+            platform = "azure"
+        seen.add(api_key)
+        results.append(ScanResult(
+            platform=platform,
+            api_key=api_key,
+            base_url=base_url,
+            source_url=source_url,
+            is_azure=is_azure,
+            is_relay=is_relay,
+            context=ctx,
+        ))
+    return results
+
+
+def load_source_ids(db, prefix: str) -> Set[str]:
+    if db is None:
+        return set()
+    try:
+        return {
+            item[len(prefix):]
+            for item in db.load_scanned_blob_shas()
+            if item.startswith(prefix)
+        }
+    except Exception:
+        return set()
+
+
+def remember_source_id(db, prefix: str, ident) -> None:
+    if db is None or ident is None or ident == "":
+        return
+    try:
+        db.mark_blob_scanned(f"{prefix}{ident}")
+    except Exception:
+        return
 
 
 def extract_source_keys(
@@ -331,40 +515,10 @@ def extract_source_keys(
     context: Optional[str] = None,
     db=None,
 ) -> List['ScanResult']:
-    """公共源提取：解码变体、丢掉被包住的短命中，再滤测试串、低熵和已入库密钥。"""
-    results = []
-    seen = set()
-    for variant in content_variants(content):
-        for start, end, platform, api_key in select_key_matches(patterns, variant):
-            if api_key in seen:
-                continue
-            if is_test_key(api_key):
-                continue
-            key_body = api_key
-            for prefix in _KEY_BODY_PREFIXES:
-                if api_key.startswith(prefix):
-                    key_body = api_key[len(prefix):]
-                    break
-            if calculate_entropy(key_body) < ENTROPY_THRESHOLD:
-                continue
-            if db is not None and db.key_exists(api_key):
-                seen.add(api_key)
-                continue
-            if context is None:
-                ctx_start = max(0, start - context_pad)
-                ctx_end = min(len(variant), end + context_pad)
-                ctx = variant[ctx_start:ctx_end]
-            else:
-                ctx = context
-            seen.add(api_key)
-            results.append(ScanResult(
-                platform=platform,
-                api_key=api_key,
-                base_url=config.default_base_urls.get(platform, ""),
-                source_url=source_url,
-                context=ctx,
-            ))
-    return results
+    """公共源入口：走统一 extract_keys。context 参数保留兼容，按命中位置取上下文。"""
+    return extract_keys(
+        patterns, content, source_url, context_pad=context_pad, db=db,
+    )
 
 
 # ============================================================================
@@ -421,8 +575,6 @@ class GitHubScanner:
         self._preload_scanned_shas()
         
         self._key_patterns = COMPILED_KEY_PATTERNS
-        self._base_url_patterns = COMPILED_BASE_URL_PATTERNS
-        self._azure_url_pattern = COMPILED_AZURE_URL_PATTERN
         
         # 统计
         self.stats = {
@@ -639,276 +791,14 @@ class GitHubScanner:
         if self.dashboard:
             self.dashboard.add_log(message, level)
     
-    # ========================================================================
-    #                           过滤逻辑
-    # ========================================================================
-    
-    def _should_skip_key(self, api_key: str) -> tuple:
-        """
-        检查是否应该跳过这个 Key (增强版)
-        
-        过滤规则：
-        1. 测试 Key 检测
-        2. 熵值过滤
-        3. 重复字符检测
-        4. 常见假值模式
-        
-        Returns:
-            (should_skip, reason)
-        """
-        # 1. 检查是否为测试 Key
-        if is_test_key(api_key):
-            return True, "test_key"
-        
-        # 2. 去掉前缀后计算
-        key_body = api_key
-        prefixes = ['sk-proj-', 'sk-ant-', 'sk-', 'AIza', 'hf_', 'gsk_']
-        for prefix in prefixes:
-            if api_key.startswith(prefix):
-                key_body = api_key[len(prefix):]
-                break
-        
-        # 3. 熵值过滤
-        entropy = calculate_entropy(key_body)
-        if entropy < ENTROPY_THRESHOLD:
-            return True, f"low_entropy:{entropy:.2f}"
-        
-        # 4. 重复字符检测 (如 aaaaaaa, 1111111)
-        if len(set(key_body)) < 5:
-            return True, "repetitive_chars"
-        
-        # 5. 常见假值模式
-        fake_patterns = [
-            'your_api_key', 'your-api-key', 'api_key_here',
-            'insert_key', 'replace_me', 'placeholder',
-            'xxxxxxxx', 'yyyyyyyy', '12345678', 'abcdefgh',
-            'test1234', 'demo1234', 'sample12'
-        ]
-        key_lower = api_key.lower()
-        for pattern in fake_patterns:
-            if pattern in key_lower:
-                return True, f"fake_pattern:{pattern}"
-        
-        # 6. 连续字符检测 (如 abcdefgh, 12345678)
-        if self._has_sequential_chars(key_body, 6):
-            return True, "sequential_chars"
-        
-        return False, ""
-    
-    def _has_sequential_chars(self, s: str, min_len: int = 6) -> bool:
-        """检测连续递增/递减字符"""
-        if len(s) < min_len:
-            return False
-        count = 1
-        for i in range(1, len(s)):
-            if ord(s[i]) == ord(s[i-1]) + 1 or ord(s[i]) == ord(s[i-1]) - 1:
-                count += 1
-                if count >= min_len:
-                    return True
-            else:
-                count = 1
-        return False
-    
-    def _should_skip_url(self, url: str) -> tuple:
-        """
-        检查是否应该跳过这个 URL
-        
-        Returns:
-            (should_skip, reason)
-        """
-        if is_blacklisted_url(url):
-            return True, "blacklisted"
-        return False, ""
-    
-    # ========================================================================
-    #                           上下文提取
-    # ========================================================================
-    
-    def _extract_context(self, content: str, key_pos: int) -> str:
-        """提取 Key 周围的上下文"""
-        lines = content.split('\n')
-        line_num = content[:key_pos].count('\n')
-        
-        start_line = max(0, line_num - config.context_window)
-        end_line = min(len(lines), line_num + config.context_window + 1)
-        
-        return '\n'.join(lines[start_line:end_line])
-    
-    def _is_azure_context(self, context: str) -> bool:
-        """检查是否为 Azure 上下文"""
-        context_lower = context.lower()
-        return any(kw.lower() in context_lower for kw in AZURE_CONTEXT_KEYWORDS)
-    
-    def _extract_azure_endpoint(self, context: str) -> Optional[str]:
-        """提取 Azure Endpoint"""
-        match = self._azure_url_pattern.search(context)
-        return match.group(0) if match else None
-    
-    def _is_valid_relay_url(self, url: str) -> bool:
-        """
-        检查 URL 是否可能是有效的 API 中转站
-        
-        排除文档网站、无关 API 等
-        """
-        url_lower = url.lower()
-        
-        # 1. 检查无效域名黑名单
-        for invalid_domain in INVALID_BASE_URL_DOMAINS:
-            if invalid_domain in url_lower:
-                return False
-        
-        # 2. 检查是否包含已知中转站特征
-        for relay_keyword in KNOWN_RELAY_DOMAINS:
-            if relay_keyword in url_lower:
-                return True
-        
-        # 3. 检查 URL 路径是否像 API 端点
-        # 真正的中转站通常是简短的域名，不会有复杂路径
-        from urllib.parse import urlparse
-        try:
-            parsed = urlparse(url)
-            path = parsed.path.strip('/')
-            
-            # 排除有复杂路径的 URL（通常是文档链接）
-            if path and '/' in path and len(path) > 20:
-                return False
-            
-            # 排除明显的文档/设置页面
-            doc_indicators = ['docs', 'settings', 'ref/', 'guide', 'tutorial', 'help']
-            if any(ind in path.lower() for ind in doc_indicators):
-                return False
-                
-        except Exception as e:
-            logger.debug(f"异常: {type(e).__name__}")
-        
-        return True
-    
-    def _extract_base_url(self, context: str, platform: str) -> tuple:
-        """
-        从上下文提取 Base URL
-        
-        优化：增加中转站有效性检测
-        
-        Returns:
-            (url, is_relay)
-        """
-        found_urls = []
-        
-        for pattern in self._base_url_patterns:
-            for match in pattern.finditer(context):
-                url = match.group(1) if match.lastindex else match.group(0)
-                url = url.strip().rstrip('/"\'')
-                
-                if not url.startswith('http'):
-                    continue
-                if 'github.com' in url or 'githubusercontent' in url:
-                    continue
-                if len(url) < 10:
-                    continue
-                
-                # ========== 新增：检查是否为有效中转站 URL ==========
-                if not self._is_valid_relay_url(url):
-                    continue
-                
-                # 计算优先级
-                priority = 0
-                url_lower = url.lower()
-                
-                # 已知中转站域名优先级最高
-                for relay_domain in KNOWN_RELAY_DOMAINS:
-                    if relay_domain in url_lower:
-                        priority += 5
-                        break
-                
-                # 其他关键词
-                for keyword in URL_PRIORITY_KEYWORDS:
-                    if keyword in url_lower:
-                        priority += 1
-                
-                found_urls.append((url, priority))
-        
-        if found_urls:
-            found_urls.sort(key=lambda x: x[1], reverse=True)
-            best_url = found_urls[0][0]
-            best_url = re.sub(r'/v\d+/?$', '', best_url).rstrip('/')
-            
-            # 判断是否为中转站（非官方域名）
-            is_relay = 'openai.com' not in best_url and 'azure.com' not in best_url
-            
-            return best_url, is_relay
-        
-        return config.default_base_urls.get(platform, ""), False
-    
     def _extract_keys_from_content(self, content: str, source_url: str) -> List[ScanResult]:
-        """
-        从代码内容提取 Key
-
-        先用内存和数据库丢掉已经见过的密钥，再做熵过滤。
-        解码只在结果和原文不同时再扫一遍。
-        """
+        """统一 extract_keys，再叠本轮内存去重。"""
         results = []
-
-        for content_variant in content_variants(content):
-            for start, end, platform, api_key in select_key_matches(self._key_patterns, content_variant):
-
-                    # ========== 优化：预过滤提前 ==========
-                    # 1. 内存缓存检查（最快）
-                    if self._is_key_processed(api_key):
-                        continue
-
-                    # 2. 数据库预检查（在任何其他处理前，提前丢弃已入库 Key）
-                    # 这一步可减轻下游验证队列压力
-                    if self.db.key_exists(api_key):
-                        self._mark_key_processed(api_key)
-                        continue
-
-                    # 过滤检查
-                    should_skip, reason = self._should_skip_key(api_key)
-                    if should_skip:
-                        self._mark_key_processed(api_key)
-                        self.stats["skipped_entropy"] += 1
-                        if self.dashboard:
-                            self.dashboard.increment_stat("skipped_low_entropy")
-                        self._log(f"跳过 {mask_key(api_key)} ({reason})", "SKIP")
-                        continue
-
-                    # 提取上下文
-                    context = self._extract_context(content_variant, start)
-
-                    # 检查 Azure
-                    is_azure = self._is_azure_context(context)
-
-                    if is_azure:
-                        azure_endpoint = self._extract_azure_endpoint(context)
-                        base_url = azure_endpoint or ""
-                        actual_platform = "azure"
-                        is_relay = False
-                    else:
-                        base_url, is_relay = self._extract_base_url(context, platform)
-                        actual_platform = "relay" if is_relay else platform
-
-                    # URL 黑名单检查
-                    should_skip_url, url_reason = self._should_skip_url(base_url)
-                    if should_skip_url:
-                        self._mark_key_processed(api_key)
-                        self.stats["skipped_blacklist"] += 1
-                        if self.dashboard:
-                            self.dashboard.increment_stat("skipped_blacklist")
-                        self._log(f"跳过 {mask_key(api_key)} (URL: {url_reason})", "SKIP")
-                        continue
-
-                    results.append(ScanResult(
-                        platform=actual_platform,
-                        api_key=api_key,
-                        base_url=base_url,
-                        source_url=source_url,
-                        is_azure=is_azure,
-                        is_relay=is_relay,
-                        context=context
-                    ))
-
-                    self._mark_key_processed(api_key)
-
+        for item in extract_keys(self._key_patterns, content, source_url, db=self.db):
+            if self._is_key_processed(item.api_key):
+                continue
+            self._mark_key_processed(item.api_key)
+            results.append(item)
         return results
     
     # ========================================================================
