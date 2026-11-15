@@ -69,6 +69,29 @@ def test_platform_checks_do_not_flag_high_value():
     assert "HIGH_VALUE_MODELS" not in source
 
 
+def test_claim_then_upsert_writes_final_status_once():
+    """验证结束一次 upsert，不经过 pending flush。"""
+    from async_database import AsyncDatabase
+
+    async def run():
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as root:
+            path = os.path.join(root, "keys.db")
+            db = AsyncDatabase(path)
+            await db.init()
+            assert await db.claim_key(KEY) is True
+            assert await db.claim_key(KEY) is False
+            key = _leaked_key("gemini", KEY)
+            key.status = KeyStatus.INVALID.value
+            await db.upsert_finding(key)
+            assert await db.key_exists(KEY) is True
+            await db.close()
+            with sqlite3.connect(path) as conn:
+                row = conn.execute("SELECT status FROM leaked_keys").fetchone()
+            assert row == ("invalid",)
+
+    asyncio.run(run())
+
+
 def test_queued_insert_must_flush_before_status_update():
     """queue_insert 只是入队，必须先 flush 落盘再 update_key_status。
 
@@ -110,5 +133,6 @@ def _leaked_key(platform, api_key):
 if __name__ == "__main__":
     test_process_result_does_not_score_or_store_value()
     test_platform_checks_do_not_flag_high_value()
+    test_claim_then_upsert_writes_final_status_once()
     test_queued_insert_must_flush_before_status_update()
     print("process result ok")

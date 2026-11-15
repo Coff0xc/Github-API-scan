@@ -17,7 +17,7 @@ import aiohttp
 from aiohttp import ClientTimeout
 from github import Github, GithubException
 
-from config import config, REGEX_PATTERNS
+from config import config, COMPILED_KEY_PATTERNS
 from scanner import ScanResult, calculate_entropy, is_test_key, ENTROPY_THRESHOLD
 
 
@@ -80,12 +80,7 @@ class GistScanner:
         self._processed_gists: Set[str] = set()
         self._processed_lock = threading.Lock()
 
-        # 编译正则
-        self._key_patterns = {
-            platform: re.compile(pattern)
-            for platform, pattern in REGEX_PATTERNS.items()
-            if platform != "azure"
-        }
+        self._key_patterns = COMPILED_KEY_PATTERNS
 
         # 统计
         self.stats = {

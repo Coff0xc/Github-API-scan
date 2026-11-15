@@ -26,7 +26,7 @@ from typing import List, Optional, Set
 
 from loguru import logger
 
-from config import config, REGEX_PATTERNS, BASE_URL_PATTERNS
+from config import config, COMPILED_KEY_PATTERNS, COMPILED_BASE_URL_PATTERNS
 from database import Database
 from scanner import (
     ScanResult, content_variants, select_key_matches, should_skip_file,
@@ -57,14 +57,8 @@ class LocalScanner:
         self.scan_git_history = scan_git_history
         self.db = db if db is not None else Database(config.db_path)
 
-        self._patterns = {
-            name: re.compile(pattern)
-            for name, pattern in REGEX_PATTERNS.items()
-            if name != "azure"  # azure 走上下文识别，正则太宽
-        }
-        self._base_url_patterns = [
-            re.compile(pattern, re.IGNORECASE) for pattern in BASE_URL_PATTERNS
-        ]
+        self._patterns = COMPILED_KEY_PATTERNS
+        self._base_url_patterns = COMPILED_BASE_URL_PATTERNS
         self._processed: Set[str] = set()
         self._seen_blobs: Set[str] = set()
         self._pending_blobs: List[str] = []

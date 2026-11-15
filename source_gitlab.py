@@ -18,7 +18,7 @@ from dataclasses import dataclass
 import aiohttp
 from aiohttp import ClientTimeout
 
-from config import config, REGEX_PATTERNS
+from config import config, COMPILED_KEY_PATTERNS
 from scanner import ScanResult, calculate_entropy, is_test_key, ENTROPY_THRESHOLD
 
 
@@ -63,11 +63,7 @@ class GitLabScanner:
         self._processed_ids: Set[int] = set()
         self._processed_lock = threading.Lock()
 
-        self._key_patterns = {
-            platform: re.compile(pattern)
-            for platform, pattern in REGEX_PATTERNS.items()
-            if platform != "azure"
-        }
+        self._key_patterns = COMPILED_KEY_PATTERNS
 
         self.stats = {"snippets_scanned": 0, "keys_found": 0}
         self._session: Optional[aiohttp.ClientSession] = None

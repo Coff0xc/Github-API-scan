@@ -33,6 +33,7 @@ from config import (
     CIRCUIT_BREAKER_HALF_OPEN_REQUESTS
 )
 from database import Database, LeakedKey, KeyStatus
+from utils import relay_url_is_allowed
 from connection_pool import get_connection_pool
 from retry_handler import RetryHandler, RetryConfig, ErrorType
 
@@ -191,61 +192,7 @@ class OptimizedAsyncValidator:
             await self._circuit_breaker.record_failure(url, error, http_status)
 
     def _is_likely_valid_relay(self, base_url: str) -> bool:
-        """检查 URL 是否可能是有效的中转站 + SSRF 防护"""
-        if not base_url:
-            return True
-
-        url_lower = base_url.lower()
-
-        # SSRF 防护: 强制 HTTPS
-        if not url_lower.startswith('https://'):
-            if not (url_lower.startswith('http://localhost') or url_lower.startswith('http://127.0.0.1')):
-                if url_lower.startswith('http://'):
-                    return False
-
-        # SSRF 防护: 阻止私有 IP
-        try:
-            from urllib.parse import urlparse
-            import ipaddress
-            parsed = urlparse(base_url)
-            host = parsed.hostname or ''
-            try:
-                ip = ipaddress.ip_address(host)
-                if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
-                    return False
-            except ValueError:
-                pass
-            for suffix in ['.local', '.internal', '.corp', '.lan', '.home']:
-                if host.endswith(suffix):
-                    return False
-            from utils import host_is_safe_to_contact
-            if not host_is_safe_to_contact(host):
-                return False
-        except Exception:
-            return False
-
-        # 无效域名黑名单
-        invalid_domains = [
-            'docs.djangoproject.com',
-            'docs.python.org',
-            'developer.mozilla.org',
-            'stackoverflow.com',
-            'themoviedb.org',
-            'prisma.io',
-            'pris.ly',
-            'every.to',
-            'makersuite.google.com',
-            '/settings',
-            '/ref/',
-            '/docs/',
-            '/guide',
-        ]
-
-        for invalid in invalid_domains:
-            if invalid in url_lower:
-                return False
-
-        return True
+        return relay_url_is_allowed(base_url)
 
     # ========================================================================
     #                           优化的验证方法
@@ -573,24 +520,11 @@ async def optimized_validator_worker(
                 masked = mask_key(result.api_key)
                 platform = (result.platform or "openai").lower()
 
-                # 第二层去重：验证前检查数据库
-                if await async_db.key_exists(result.api_key):
+                if not await async_db.claim_key(result.api_key):
                     logger.debug(f"[Validator-{worker_id}] Key 已存在,跳过: {masked}")
                     _safe_dashboard(dashboard, "increment_stat", "skipped_duplicate")
                     continue
 
-                # 先入库（pending 状态），由批量写入器落盘
-                await async_db.queue_insert(LeakedKey(
-                    platform=result.platform,
-                    api_key=result.api_key,
-                    base_url=result.base_url,
-                    source_url=getattr(result, "source_url", ""),
-                ))
-                # 立即落盘：否则验证耗时短于 flush 间隔时，下面的
-                # update_key_status 会命中 0 行，状态被静默丢弃。
-                await async_db.flush()
-
-                # 分发验证
                 if platform in ("openai", "relay"):
                     vr = await validator.validate_openai(result.api_key, result.base_url or "")
                     status = vr.status
@@ -604,9 +538,16 @@ async def optimized_validator_worker(
                         circuit_breaker=circuit_breaker
                     )
 
-                await async_db.update_key_status(
-                    result.api_key, status, "", model_tier, rpm, False
-                )
+                status_value = status.value if isinstance(status, KeyStatus) else status
+                await async_db.upsert_finding(LeakedKey(
+                    platform=result.platform,
+                    api_key=result.api_key,
+                    base_url=result.base_url or "",
+                    source_url=getattr(result, "source_url", "") or "",
+                    status=status_value,
+                    model_tier=model_tier or "",
+                    rpm=rpm or 0,
+                ))
                 processed_count += 1
 
                 source_url = getattr(result, "source_url", "") or ""
@@ -645,6 +586,10 @@ async def optimized_validator_worker(
                     logger.info(f"[Validator-{worker_id}] 已处理 {processed_count} 个 Key")
 
             except Exception as e:
+                try:
+                    await async_db.release_claim(result.api_key)
+                except Exception:
+                    pass
                 logger.error(f"[Validator-{worker_id}] 验证异常: {e}")
                 _safe_dashboard(dashboard, "add_log", f"[✗] 验证错误: {str(e)[:50]}", "ERROR")
 

@@ -27,6 +27,7 @@ from config import (
     CIRCUIT_BREAKER_HALF_OPEN_REQUESTS
 )
 from database import Database, LeakedKey, KeyStatus
+from utils import relay_url_is_allowed
 
 
 # ============================================================================
@@ -361,68 +362,7 @@ class AsyncValidator:
     # ========================================================================
     
     def _is_likely_valid_relay(self, base_url: str) -> bool:
-        """
-        检查 URL 是否可能是有效的中转站 + SSRF 防护
-        
-        安全检查：
-        1. 排除明显不是 API 中转站的 URL
-        2. 阻止私有 IP 地址 (RFC1918, loopback, link-local)
-        3. 阻止危险域名后缀
-        """
-        if not base_url:
-            return True  # 空 URL 会使用默认值
-        
-        url_lower = base_url.lower()
-        
-        # ========== SSRF 防护: 强制 HTTPS ==========
-        if not url_lower.startswith('https://'):
-            if not (url_lower.startswith('http://localhost') or url_lower.startswith('http://127.0.0.1')):
-                if url_lower.startswith('http://'):
-                    return False
-        
-        # ========== SSRF 防护: 阻止私有 IP ==========
-        try:
-            from urllib.parse import urlparse
-            import ipaddress
-            parsed = urlparse(base_url)
-            host = parsed.hostname or ''
-            try:
-                ip = ipaddress.ip_address(host)
-                if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
-                    return False
-            except ValueError:
-                pass
-            for suffix in ['.local', '.internal', '.corp', '.lan', '.home']:
-                if host.endswith(suffix):
-                    return False
-            from utils import host_is_safe_to_contact
-            if not host_is_safe_to_contact(host):
-                return False
-        except Exception:
-            return False
-
-        # 无效域名黑名单
-        invalid_domains = [
-            'docs.djangoproject.com',
-            'docs.python.org',
-            'developer.mozilla.org',
-            'stackoverflow.com',
-            'themoviedb.org',
-            'prisma.io',
-            'pris.ly',
-            'every.to',
-            'makersuite.google.com',
-            '/settings',
-            '/ref/',
-            '/docs/',
-            '/guide',
-        ]
-        
-        for invalid in invalid_domains:
-            if invalid in url_lower:
-                return False
-        
-        return True
+        return relay_url_is_allowed(base_url)
     
     async def validate_openai(self, api_key: str, base_url: str) -> ValidationResult:
         """异步验证 OpenAI / 中转站 - 集成熍断器保护"""

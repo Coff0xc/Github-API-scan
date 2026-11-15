@@ -105,12 +105,7 @@ class OptimizedSecretScannerV22:
         self.result_queue = None  # 将在 start() 中初始化
         self.use_dynamic_queue = True
 
-        # 异步数据库
         self.async_db: Optional[AsyncDatabase] = None
-
-        # 同步数据库
-        self.db = Database(config.db_path)
-
         self.dashboard = Dashboard()
 
         # v2.1 性能监控

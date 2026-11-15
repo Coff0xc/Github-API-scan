@@ -114,6 +114,45 @@ def test_private_targets_are_blocked():
     assert host_is_safe_to_contact("") is False
 
 
+def test_relay_url_policy_matches_host_rules():
+    from utils import relay_url_is_allowed
+
+    assert relay_url_is_allowed("") is True
+    assert relay_url_is_allowed("https://api.openai.com/v1") is True
+    assert relay_url_is_allowed("http://127.0.0.1:1/v1") is True
+    assert relay_url_is_allowed("http://localhost:8000/v1") is True
+    assert relay_url_is_allowed("http://192.168.1.1/v1") is False
+    assert relay_url_is_allowed("https://10.1.2.3/v1") is False
+    assert relay_url_is_allowed("http://internal.corp/api") is False
+    assert relay_url_is_allowed("https://docs.python.org/howto") is False
+
+    from database import Database
+    from validator import AsyncValidator
+    from validator_optimized import OptimizedAsyncValidator
+
+    sync_v = AsyncValidator(Database(":memory:"))
+    opt_v = OptimizedAsyncValidator(Database(":memory:"))
+    assert sync_v._is_likely_valid_relay("http://127.0.0.1:1/v1") is True
+    assert opt_v._is_likely_valid_relay("http://127.0.0.1:1/v1") is True
+    assert sync_v._is_likely_valid_relay("http://192.168.1.1/v1") is False
+    assert opt_v._is_likely_valid_relay("http://192.168.1.1/v1") is False
+
+
+def test_key_patterns_compiled_once_without_azure():
+    from config import COMPILED_KEY_PATTERNS, REGEX_PATTERNS
+
+    assert "azure" in REGEX_PATTERNS
+    assert "azure" not in COMPILED_KEY_PATTERNS
+    assert "openai" in COMPILED_KEY_PATTERNS
+    from scanner import GitHubScanner
+    import queue
+    import threading
+    from database import Database
+
+    scanner = GitHubScanner(queue.Queue(), Database(":memory:"), threading.Event())
+    assert scanner._key_patterns is COMPILED_KEY_PATTERNS
+
+
 if __name__ == "__main__":
     test_remote_scope_rules()
     test_search_scope_never_passes_raw_query()
@@ -123,4 +162,6 @@ if __name__ == "__main__":
     test_scoped_scan_still_requires_encryption()
     test_single_entry_point()
     test_private_targets_are_blocked()
+    test_relay_url_policy_matches_host_rules()
+    test_key_patterns_compiled_once_without_azure()
     print("boundary fixes ok")

@@ -18,7 +18,7 @@ from dataclasses import dataclass
 import aiohttp
 from aiohttp import ClientTimeout
 
-from config import config, REGEX_PATTERNS
+from config import config, COMPILED_KEY_PATTERNS
 from scanner import ScanResult, calculate_entropy, is_test_key, ENTROPY_THRESHOLD
 
 
@@ -58,9 +58,9 @@ class RealtimeScanner:
         self._processed_lock = threading.Lock()
 
         self._key_patterns = {
-            platform: re.compile(pattern)
-            for platform, pattern in REGEX_PATTERNS.items()
-            if platform not in ("azure", "aws_secret_key")
+            name: pattern
+            for name, pattern in COMPILED_KEY_PATTERNS.items()
+            if name != "aws_secret_key"
         }
 
         self.stats = {"events_checked": 0, "commits_scanned": 0, "keys_found": 0}

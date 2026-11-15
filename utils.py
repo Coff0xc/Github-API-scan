@@ -8,10 +8,13 @@
 - 文件过滤
 """
 
+import ipaddress
 import math
-from functools import lru_cache
+import socket
 from collections import Counter
+from functools import lru_cache
 from typing import Tuple
+from urllib.parse import urlparse
 
 
 # ============================================================================
@@ -154,6 +157,45 @@ def has_sequential_chars(s: str, min_len: int = 6) -> bool:
     return False
 
 
+# 文档站和示例页，配对到的地址不能拿去验证。
+_RELAY_DOC_MARKERS = (
+    "docs.djangoproject.com",
+    "docs.python.org",
+    "developer.mozilla.org",
+    "stackoverflow.com",
+    "themoviedb.org",
+    "prisma.io",
+    "pris.ly",
+    "every.to",
+    "makersuite.google.com",
+    "/settings",
+    "/ref/",
+    "/docs/",
+    "/guide",
+)
+_RELAY_HOST_SUFFIXES = (".local", ".internal", ".corp", ".lan", ".home")
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+def relay_url_is_allowed(base_url: str) -> bool:
+    """验证请求能不能打到这个中转地址。空地址表示稍后用平台默认值。"""
+    if not base_url:
+        return True
+    parsed = urlparse(base_url)
+    host = (parsed.hostname or "").strip("[]").lower()
+    scheme = (parsed.scheme or "").lower()
+    if scheme not in ("http", "https"):
+        return False
+    if scheme == "http" and host not in _LOOPBACK_HOSTS:
+        return False
+    if any(host.endswith(suffix) for suffix in _RELAY_HOST_SUFFIXES):
+        return False
+    if not host_is_safe_to_contact(host):
+        return False
+    url_lower = base_url.lower()
+    return not any(marker in url_lower for marker in _RELAY_DOC_MARKERS)
+
+
 def host_is_safe_to_contact(host: str) -> bool:
     """
     验证请求只能打到公网地址。
@@ -162,9 +204,6 @@ def host_is_safe_to_contact(host: str) -> bool:
     域名会解析出全部地址，任一落在这些范围里就拒绝。
     localhost 和 127.0.0.1 保留给本机中转调试。
     """
-    import ipaddress
-    import socket
-
     if not host:
         return False
     normalized = host.strip("[]").lower().rstrip(".")

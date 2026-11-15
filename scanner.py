@@ -27,8 +27,9 @@ from aiohttp import ClientTimeout, TCPConnector
 from github import Github, GithubException, RateLimitExceededException
 
 from config import (
-    config, REGEX_PATTERNS, BASE_URL_PATTERNS, 
-    AZURE_URL_PATTERN, AZURE_CONTEXT_KEYWORDS, URL_PRIORITY_KEYWORDS
+    config, REGEX_PATTERNS, BASE_URL_PATTERNS,
+    AZURE_URL_PATTERN, AZURE_CONTEXT_KEYWORDS, URL_PRIORITY_KEYWORDS,
+    COMPILED_KEY_PATTERNS, COMPILED_BASE_URL_PATTERNS, COMPILED_AZURE_URL_PATTERN,
 )
 from database import Database, LeakedKey, KeyStatus
 
@@ -368,16 +369,9 @@ class GitHubScanner:
         # 从数据库预加载已扫描的 SHA（可选，用于加速）
         self._preload_scanned_shas()
         
-        # 编译正则
-        self._key_patterns = {
-            platform: re.compile(pattern)
-            for platform, pattern in REGEX_PATTERNS.items()
-        }
-        self._base_url_patterns = [
-            re.compile(pattern, re.IGNORECASE | re.MULTILINE)
-            for pattern in BASE_URL_PATTERNS
-        ]
-        self._azure_url_pattern = re.compile(AZURE_URL_PATTERN, re.IGNORECASE)
+        self._key_patterns = COMPILED_KEY_PATTERNS
+        self._base_url_patterns = COMPILED_BASE_URL_PATTERNS
+        self._azure_url_pattern = COMPILED_AZURE_URL_PATTERN
         
         # 统计
         self.stats = {

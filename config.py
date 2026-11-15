@@ -10,8 +10,9 @@ This module provides:
 
 import os
 import random
+import re
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set, FrozenSet
+from typing import Dict, List, Optional, Set, FrozenSet, Pattern
 
 
 # ============================================================================
@@ -258,6 +259,18 @@ BASE_URL_PATTERNS = [
 
 # URL keyword priority (for sorting extracted URLs)
 URL_PRIORITY_KEYWORDS = ['base', 'api', 'host', 'endpoint', 'proxy', 'openai', 'relay']
+
+# Compile once. Scanners share these objects; do not mutate the dicts.
+COMPILED_KEY_PATTERNS: Dict[str, Pattern[str]] = {
+    name: re.compile(pattern)
+    for name, pattern in REGEX_PATTERNS.items()
+    if name != "azure"
+}
+COMPILED_AZURE_PATTERN: Pattern[str] = re.compile(REGEX_PATTERNS["azure"])
+COMPILED_AZURE_URL_PATTERN: Pattern[str] = re.compile(AZURE_URL_PATTERN, re.IGNORECASE)
+COMPILED_BASE_URL_PATTERNS: List[Pattern[str]] = [
+    re.compile(pattern, re.IGNORECASE) for pattern in BASE_URL_PATTERNS
+]
 
 
 # ============================================================================
