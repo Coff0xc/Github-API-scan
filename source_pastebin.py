@@ -56,12 +56,14 @@ class PastebinScanner:
         result_queue: queue.Queue,
         stop_event: threading.Event,
         dashboard=None,
-        api_key: str = ""
+        api_key: str = "",
+        db=None,
     ):
         self.result_queue = result_queue
         self.stop_event = stop_event
         self.dashboard = dashboard
         self.api_key = api_key  # Pastebin Pro API Key
+        self.db = db
 
         # 已处理的 Paste Key
         self._processed_pastes: Set[str] = set()
@@ -155,7 +157,7 @@ class PastebinScanner:
 
     def _extract_keys(self, content: str, source_url: str) -> List[ScanResult]:
         """从内容中提取 API Key"""
-        return extract_source_keys(self._key_patterns, content, source_url)
+        return extract_source_keys(self._key_patterns, content, source_url, db=self.db)
 
     async def _scan_paste(self, paste: PasteMetadata) -> int:
         """扫描单个 Paste"""
@@ -232,10 +234,11 @@ def start_pastebin_scanner(
     result_queue: queue.Queue,
     stop_event: threading.Event,
     dashboard=None,
-    api_key: str = ""
+    api_key: str = "",
+    db=None,
 ) -> threading.Thread:
     """启动 Pastebin 扫描器线程"""
-    scanner = PastebinScanner(result_queue, stop_event, dashboard, api_key)
+    scanner = PastebinScanner(result_queue, stop_event, dashboard, api_key, db=db)
     thread = threading.Thread(
         target=scanner.run,
         name="PastebinScanner",

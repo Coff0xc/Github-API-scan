@@ -63,11 +63,13 @@ class SearchCodeScanner:
         self,
         result_queue: queue.Queue,
         stop_event: threading.Event,
-        dashboard=None
+        dashboard=None,
+        db=None,
     ):
         self.result_queue = result_queue
         self.stop_event = stop_event
         self.dashboard = dashboard
+        self.db = db
 
         self._processed_ids: Set[str] = set()
         self._processed_lock = threading.Lock()
@@ -124,6 +126,7 @@ class SearchCodeScanner:
             content,
             code_result.url,
             context=content[:500],
+            db=self.db,
         )
 
     async def _scan_keyword(self, keyword: str) -> int:
@@ -199,10 +202,11 @@ class SearchCodeScanner:
 def start_searchcode_scanner(
     result_queue: queue.Queue,
     stop_event: threading.Event,
-    dashboard=None
+    dashboard=None,
+    db=None,
 ) -> threading.Thread:
     """启动 SearchCode 扫描器"""
-    scanner = SearchCodeScanner(result_queue, stop_event, dashboard)
+    scanner = SearchCodeScanner(result_queue, stop_event, dashboard, db=db)
     thread = threading.Thread(target=scanner.run, name="SearchCodeScanner", daemon=True)
     thread.start()
     return thread

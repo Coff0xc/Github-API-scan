@@ -65,6 +65,51 @@ def test_extract_source_keys_decodes_percent_encoded_key():
     assert results[0].platform == "openai"
 
 
+def test_extract_source_keys_skips_keys_already_in_db():
+    from datetime import datetime
+    from database import Database, LeakedKey, KeyStatus
+
+    db = Database(":memory:")
+    assert db.insert_key(LeakedKey(
+        platform="openai",
+        api_key=OVERLAP_OPENAI,
+        base_url="https://api.openai.com/v1",
+        status=KeyStatus.INVALID.value,
+        found_time=datetime.now(),
+    ))
+    assert extract_source_keys(COMPILED_KEY_PATTERNS, OVERLAP_TEXT, SOURCE, db=db) == []
+    assert [r.api_key for r in extract_source_keys(
+        COMPILED_KEY_PATTERNS, OVERLAP_TEXT, SOURCE,
+    )] == [OVERLAP_OPENAI]
+
+
+def test_public_scanners_skip_keys_already_in_db():
+    from datetime import datetime
+    from database import Database, LeakedKey, KeyStatus
+    from source_gist import GistScanner
+
+    db = Database(":memory:")
+    assert db.insert_key(LeakedKey(
+        platform="openai",
+        api_key=OVERLAP_OPENAI,
+        base_url="https://api.openai.com/v1",
+        status=KeyStatus.INVALID.value,
+        found_time=datetime.now(),
+    ))
+    stop = threading.Event()
+    for found in (
+        GitLabScanner(queue.Queue(), stop, db=db)._extract_keys(OVERLAP_TEXT, SOURCE),
+        PastebinScanner(queue.Queue(), stop, db=db)._extract_keys(OVERLAP_TEXT, SOURCE),
+        RealtimeScanner(queue.Queue(), stop, db=db)._extract_keys(OVERLAP_TEXT, SOURCE),
+        SearchCodeScanner(queue.Queue(), stop, db=db)._extract_keys(CodeResult(
+            id="1", filename="env", repo="acme/app", url=SOURCE,
+            lines={"1": OVERLAP_TEXT},
+        )),
+        GistScanner(queue.Queue(), stop, db=db)._extract_keys(OVERLAP_TEXT, SOURCE),
+    ):
+        assert found == []
+
+
 def test_extract_source_keys_does_not_duplicate_plain_and_encoded():
     key = "sk-proj-Qw9Rt8Yu7Ip6Lk5Jh4Gf3Ds2Az1Xc0Vb"
     encoded = "sk-proj-Qw9%52t8Yu7Ip6Lk5Jh4Gf3Ds2Az1Xc0Vb"

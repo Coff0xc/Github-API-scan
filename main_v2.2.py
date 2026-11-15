@@ -222,7 +222,8 @@ class OptimizedSecretScannerV22:
                 self.result_queue,
                 self.stop_event,
                 dashboard=self.dashboard,
-                api_key=self.pastebin_api_key
+                api_key=self.pastebin_api_key,
+                db=self.db,
             )
             self.dashboard.add_log("[Pastebin] 扫描源已启用", "INFO")
 
@@ -230,7 +231,8 @@ class OptimizedSecretScannerV22:
             self.gist_thread = start_gist_scanner(
                 self.result_queue,
                 self.stop_event,
-                dashboard=self.dashboard
+                dashboard=self.dashboard,
+                db=self.db,
             )
             self.dashboard.add_log("[Gist] 扫描源已启用", "INFO")
 
@@ -238,7 +240,8 @@ class OptimizedSecretScannerV22:
             self.searchcode_thread = start_searchcode_scanner(
                 self.result_queue,
                 self.stop_event,
-                dashboard=self.dashboard
+                dashboard=self.dashboard,
+                db=self.db,
             )
             self.dashboard.add_log("[SearchCode] 扫描源已启用", "INFO")
 
@@ -246,7 +249,8 @@ class OptimizedSecretScannerV22:
             self.gitlab_thread = start_gitlab_scanner(
                 self.result_queue,
                 self.stop_event,
-                dashboard=self.dashboard
+                dashboard=self.dashboard,
+                db=self.db,
             )
             self.dashboard.add_log("[GitLab] 扫描源已启用", "INFO")
 
@@ -254,7 +258,8 @@ class OptimizedSecretScannerV22:
             self.realtime_thread = start_realtime_scanner(
                 self.result_queue,
                 self.stop_event,
-                dashboard=self.dashboard
+                dashboard=self.dashboard,
+                db=self.db,
             )
             self.dashboard.add_log("[Realtime] 实时监控已启用", "INFO")
 

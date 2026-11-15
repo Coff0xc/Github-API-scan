@@ -48,11 +48,13 @@ class RealtimeScanner:
         self,
         result_queue: queue.Queue,
         stop_event: threading.Event,
-        dashboard=None
+        dashboard=None,
+        db=None,
     ):
         self.result_queue = result_queue
         self.stop_event = stop_event
         self.dashboard = dashboard
+        self.db = db
 
         self._processed_shas: Set[str] = set()
         self._processed_lock = threading.Lock()
@@ -151,7 +153,7 @@ class RealtimeScanner:
     def _extract_keys(self, content: str, source_url: str) -> List[ScanResult]:
         """提取 Key"""
         return extract_source_keys(
-            self._key_patterns, content, source_url, context_pad=100,
+            self._key_patterns, content, source_url, context_pad=100, db=self.db,
         )
 
     async def _process_push_event(self, event: dict) -> int:
@@ -248,10 +250,11 @@ class RealtimeScanner:
 def start_realtime_scanner(
     result_queue: queue.Queue,
     stop_event: threading.Event,
-    dashboard=None
+    dashboard=None,
+    db=None,
 ) -> threading.Thread:
     """启动实时扫描器"""
-    scanner = RealtimeScanner(result_queue, stop_event, dashboard)
+    scanner = RealtimeScanner(result_queue, stop_event, dashboard, db=db)
     thread = threading.Thread(target=scanner.run, name="RealtimeScanner", daemon=True)
     thread.start()
     return thread

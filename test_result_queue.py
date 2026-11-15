@@ -39,6 +39,7 @@ def test_remote_main_uses_sync_queue():
     assert "asyncio.Queue(maxsize=10000)" not in source
     assert "self.db = Database(config.db_path)" in source
     assert "start_scanner(\n            self.result_queue,\n            self.db," in source
+    assert source.count("db=self.db") == 5
     main = _load_main()
     scanner = main.OptimizedSecretScannerV22(target_org="example")
     assert isinstance(scanner.result_queue, queue.Queue)

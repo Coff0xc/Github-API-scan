@@ -329,8 +329,9 @@ def extract_source_keys(
     *,
     context_pad: int = 200,
     context: Optional[str] = None,
+    db=None,
 ) -> List['ScanResult']:
-    """公共源提取：解码变体、丢掉被包住的短命中，再滤测试串和低熵。"""
+    """公共源提取：解码变体、丢掉被包住的短命中，再滤测试串、低熵和已入库密钥。"""
     results = []
     seen = set()
     for variant in content_variants(content):
@@ -345,6 +346,9 @@ def extract_source_keys(
                     key_body = api_key[len(prefix):]
                     break
             if calculate_entropy(key_body) < ENTROPY_THRESHOLD:
+                continue
+            if db is not None and db.key_exists(api_key):
+                seen.add(api_key)
                 continue
             if context is None:
                 ctx_start = max(0, start - context_pad)

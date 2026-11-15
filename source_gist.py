@@ -65,11 +65,13 @@ class GistScanner:
         self,
         result_queue: queue.Queue,
         stop_event: threading.Event,
-        dashboard=None
+        dashboard=None,
+        db=None,
     ):
         self.result_queue = result_queue
         self.stop_event = stop_event
         self.dashboard = dashboard
+        self.db = db
 
         # GitHub 客户端
         self._github_clients: List[Github] = []
@@ -146,7 +148,7 @@ class GistScanner:
 
     def _extract_keys(self, content: str, source_url: str) -> List[ScanResult]:
         """从内容中提取 API Key"""
-        return extract_source_keys(self._key_patterns, content, source_url)
+        return extract_source_keys(self._key_patterns, content, source_url, db=self.db)
 
     def _search_gists(self, keyword: str) -> List[GistFile]:
         """搜索包含关键词的公开 Gist"""
@@ -277,10 +279,11 @@ class GistScanner:
 def start_gist_scanner(
     result_queue: queue.Queue,
     stop_event: threading.Event,
-    dashboard=None
+    dashboard=None,
+    db=None,
 ) -> threading.Thread:
     """启动 Gist 扫描器线程"""
-    scanner = GistScanner(result_queue, stop_event, dashboard)
+    scanner = GistScanner(result_queue, stop_event, dashboard, db=db)
     thread = threading.Thread(
         target=scanner.run,
         name="GistScanner",
