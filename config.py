@@ -12,7 +12,7 @@ import os
 import random
 import re
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set, FrozenSet, Pattern
+from typing import Dict, List, Optional, Set, FrozenSet, Pattern, Tuple
 
 
 # ============================================================================
@@ -271,6 +271,43 @@ COMPILED_AZURE_URL_PATTERN: Pattern[str] = re.compile(AZURE_URL_PATTERN, re.IGNO
 COMPILED_BASE_URL_PATTERNS: List[Pattern[str]] = [
     re.compile(pattern, re.IGNORECASE) for pattern in BASE_URL_PATTERNS
 ]
+
+# 无前缀模式：只有上下文里出现平台名才当候选，避免咬到带前缀 key 的 body。
+BARE_KEY_PLATFORMS = frozenset({
+    "mistral", "runpod", "ai21", "together", "baseten",
+    "cloudflare_ai", "azure_ai", "aws_secret_key",
+})
+BARE_PLATFORM_HINTS: Dict[str, Tuple[str, ...]] = {
+    "mistral": ("mistral",),
+    "runpod": ("runpod",),
+    "ai21": ("ai21", "jamba"),
+    "together": ("together",),
+    "baseten": ("baseten",),
+    "cloudflare_ai": ("cloudflare", "workers.ai"),
+    "azure_ai": ("azure.ai", "cognitiveservices"),
+    "aws_secret_key": ("aws", "secret_access", "aws_secret"),
+    "azure": ("azure", "openai.azure.com", "azure_endpoint"),
+}
+
+_PREFIXED_PATTERN_ITEMS = sorted(
+    (
+        (name, pattern)
+        for name, pattern in REGEX_PATTERNS.items()
+        if name != "azure" and name not in BARE_KEY_PLATFORMS
+    ),
+    key=lambda item: len(item[1]),
+    reverse=True,
+)
+COMPILED_PREFIXED_UNION: Pattern[str] = re.compile(
+    "|".join(f"(?P<{name}>{pattern})" for name, pattern in _PREFIXED_PATTERN_ITEMS)
+)
+COMPILED_BARE_PATTERNS: Dict[str, Pattern[str]] = {
+    name: COMPILED_KEY_PATTERNS[name]
+    for name in BARE_KEY_PLATFORMS
+    if name in COMPILED_KEY_PATTERNS
+}
+# azure 32 位 hex 不进 COMPILED_KEY_PATTERNS，只在上下文提示下作为无前缀平台扫描。
+COMPILED_BARE_PATTERNS["azure"] = COMPILED_AZURE_PATTERN
 
 
 # ============================================================================
