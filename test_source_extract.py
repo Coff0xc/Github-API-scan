@@ -1,4 +1,4 @@
-"""公共源提取走 select_key_matches：被包住的短命中不再单独留下。"""
+"""公共源提取走 content_variants + select_key_matches。"""
 
 import queue
 import threading
@@ -52,3 +52,23 @@ def test_public_scanners_use_longest_match():
     ):
         assert [r.platform for r in found] == ["openai"]
         assert found[0].api_key == OVERLAP_OPENAI
+
+
+def test_extract_source_keys_decodes_percent_encoded_key():
+    key = "sk-proj-Qw9Rt8Yu7Ip6Lk5Jh4Gf3Ds2Az1Xc0Vb"
+    encoded = "sk-proj-Qw9%52t8Yu7Ip6Lk5Jh4Gf3Ds2Az1Xc0Vb"
+    assert key not in encoded
+    results = extract_source_keys(
+        COMPILED_KEY_PATTERNS, f"API_KEY={encoded}", SOURCE,
+    )
+    assert [r.api_key for r in results] == [key]
+    assert results[0].platform == "openai"
+
+
+def test_extract_source_keys_does_not_duplicate_plain_and_encoded():
+    key = "sk-proj-Qw9Rt8Yu7Ip6Lk5Jh4Gf3Ds2Az1Xc0Vb"
+    encoded = "sk-proj-Qw9%52t8Yu7Ip6Lk5Jh4Gf3Ds2Az1Xc0Vb"
+    results = extract_source_keys(
+        COMPILED_KEY_PATTERNS, f"{key}\n{encoded}", SOURCE,
+    )
+    assert [r.api_key for r in results] == [key]

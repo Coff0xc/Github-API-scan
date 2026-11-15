@@ -329,31 +329,36 @@ def extract_source_keys(
     context_pad: int = 200,
     context: Optional[str] = None,
 ) -> List['ScanResult']:
-    """公共源提取：先丢掉被更长命中包住的短命中，再滤测试串和低熵。"""
+    """公共源提取：解码变体、丢掉被包住的短命中，再滤测试串和低熵。"""
     results = []
-    for start, end, platform, api_key in select_key_matches(patterns, content):
-        if is_test_key(api_key):
-            continue
-        key_body = api_key
-        for prefix in _KEY_BODY_PREFIXES:
-            if api_key.startswith(prefix):
-                key_body = api_key[len(prefix):]
-                break
-        if calculate_entropy(key_body) < ENTROPY_THRESHOLD:
-            continue
-        if context is None:
-            ctx_start = max(0, start - context_pad)
-            ctx_end = min(len(content), end + context_pad)
-            ctx = content[ctx_start:ctx_end]
-        else:
-            ctx = context
-        results.append(ScanResult(
-            platform=platform,
-            api_key=api_key,
-            base_url=config.default_base_urls.get(platform, ""),
-            source_url=source_url,
-            context=ctx,
-        ))
+    seen = set()
+    for variant in content_variants(content):
+        for start, end, platform, api_key in select_key_matches(patterns, variant):
+            if api_key in seen:
+                continue
+            if is_test_key(api_key):
+                continue
+            key_body = api_key
+            for prefix in _KEY_BODY_PREFIXES:
+                if api_key.startswith(prefix):
+                    key_body = api_key[len(prefix):]
+                    break
+            if calculate_entropy(key_body) < ENTROPY_THRESHOLD:
+                continue
+            if context is None:
+                ctx_start = max(0, start - context_pad)
+                ctx_end = min(len(variant), end + context_pad)
+                ctx = variant[ctx_start:ctx_end]
+            else:
+                ctx = context
+            seen.add(api_key)
+            results.append(ScanResult(
+                platform=platform,
+                api_key=api_key,
+                base_url=config.default_base_urls.get(platform, ""),
+                source_url=source_url,
+                context=ctx,
+            ))
     return results
 
 
