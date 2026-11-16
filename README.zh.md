@@ -19,14 +19,16 @@
 ```bash
 git clone https://github.com/Coff0xc/Github-API-scan.git
 cd Github-API-scan
-pip install -r requirements.txt
+pip install -e ".[dev]"
 
-python main_v2.2.py --authorized --target-org your-org
-python main_v2.2.py --authorized --target-repo owner/name
-python main_v2.2.py --authorized --scan-local ./your-repo
+aikeyscan --authorized --target-org your-org
+aikeyscan --authorized --target-repo owner/name
+aikeyscan --authorized --scan-local ./your-repo
 
 python web_dashboard.py    # http://127.0.0.1:5000
 ```
+
+`python main_v2.2.py` 仍是同一条命令。
 
 处理顺序：从文件（本地历史按 blob 去重）抽出密钥形状 → 熵和路径丢掉示例串 → 重叠命中只留更长的 → 绑最近的 `base_url` → 向该主机验证（SSRF 拦私网，本机中转可走 loopback）→ 一次写入最终状态。正则在 import 时编译一次。远程搜索必须带 `--target-org` 或 `--target-repo`。
 
@@ -35,9 +37,9 @@ python web_dashboard.py    # http://127.0.0.1:5000
 ## 三条常用命令
 
 ```bash
-python main_v2.2.py --authorized --target-org your-org
+aikeyscan --authorized --target-org your-org
 python web_dashboard.py
-python main_v2.2.py --findings-json findings.json
+aikeyscan --findings-json findings.json
 ```
 
 `GITHUB_TOKENS`、`DB_ENCRYPTION_KEY`、`DASHBOARD_TOKEN` 用环境变量或 `config_local.py` 配置，不要提交进 git。

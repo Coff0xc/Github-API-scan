@@ -1,12 +1,10 @@
 # 迁移
 
-当前唯一入口是 `main_v2.2.py`。`main.py`、`main_optimized.py`、`main_v2.1.py` 已经删除，不要再重命名或调用它们。
-
-旧命令只需要换入口名，并补上现在强制的范围：
+当前安装入口是 `aikeyscan`（`pip install -e .`）。`python main_v2.2.py` 仍转发到同一实现。`main.py`、`main_optimized.py`、`main_v2.1.py` 已经删除。
 
 ```bash
-python main_v2.2.py --authorized --target-org your-org
-python main_v2.2.py --authorized --target-repo owner/name
+aikeyscan --authorized --target-org your-org
+aikeyscan --authorized --target-repo owner/name
 ```
 
 写数据库需要 `DB_ENCRYPTION_KEY`。只有明确接受明文落盘时才加 `--allow-plaintext-db`。

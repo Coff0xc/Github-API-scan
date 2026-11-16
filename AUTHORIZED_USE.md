@@ -47,7 +47,7 @@
 
 | 机制 | 位置 | 作用 |
 |---|---|---|
-| 启动确认 | `use_boundary.py`，唯一实现 `main_v2.2.py` | 未确认边界不启动。其余 main 文件只做转发 |
+| 启动确认 | `use_boundary.py`，唯一实现 `scanner_main.py`（`aikeyscan` / `main_v2.2.py`） | 未确认边界不启动 |
 | 远程范围 | `require_remote_scope` | 没有 `--target-org` 或 `--target-repo` 时不发起 GitHub 搜索 |
 | 公开源开关 | `--allow-public-sources` | 不能按组织限定的来源默认关闭 |
 | 写库加密 | `storage_encryption_ready` | 扫描写入前要求 `DB_ENCRYPTION_KEY`，或显式 `--allow-plaintext-db` |

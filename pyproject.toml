@@ -1,0 +1,92 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aikeyscan"
+version = "0.4.0"
+description = "Authorized AI API key scanner: pair each key with its relay URL and check if it still works."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+authors = [{ name = "Coff0xc" }]
+keywords = ["secret-scanning", "api-key", "openai", "relay", "security"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+]
+dependencies = [
+    "PyGithub==2.1.1",
+    "aiohttp[speedups]==3.9.5",
+    "aiodns==3.2.0",
+    "pycares==4.4.0",
+    "rich==13.7.1",
+    "loguru==0.7.2",
+    "urllib3==2.2.1",
+    "certifi==2024.6.2",
+    "psutil==5.9.8",
+    "requests==2.32.3",
+    "aiosqlite==0.20.0",
+    "uvloop==0.19.0; sys_platform != 'win32'",
+    "PyYAML==6.0.1",
+    "cryptography==42.0.8",
+    "Flask==3.0.3",
+    "flask-cors==4.0.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0,<9",
+    "pytest-asyncio>=0.23,<2",
+]
+
+[project.scripts]
+aikeyscan = "aikeyscan.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/Coff0xc/Github-API-scan"
+Repository = "https://github.com/Coff0xc/Github-API-scan"
+
+[tool.setuptools]
+include-package-data = true
+py-modules = [
+    "scanner_main",
+    "config",
+    "database",
+    "async_database",
+    "scanner",
+    "local_scanner",
+    "ui",
+    "utils",
+    "use_boundary",
+    "export_io",
+    "findings_feed",
+    "key_vault",
+    "cache_manager",
+    "connection_pool",
+    "retry_handler",
+    "performance_monitor",
+    "validator_optimized",
+    "threat_report",
+    "notify_integration",
+    "notifier_v2",
+    "source_gist",
+    "source_gitlab",
+    "source_pastebin",
+    "source_searchcode",
+    "source_realtime",
+    "web_dashboard",
+    "ai_detector",
+    "ai_scanner_integration",
+    "queue_manager",
+]
+
+[tool.setuptools.packages.find]
+include = ["aikeyscan", "aikeyscan.*", "validator", "validator.*"]

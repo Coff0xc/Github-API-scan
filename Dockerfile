@@ -9,14 +9,9 @@ RUN apt-get update && apt-get install -y \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first for better caching
-COPY requirements.txt .
-
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy application files
+# Copy application files then install the package (console script: aikeyscan)
 COPY . .
+RUN pip install --no-cache-dir .
 
 # Create volume mount points
 VOLUME ["/app/data"]
@@ -29,4 +24,4 @@ ENV PYTHONUNBUFFERED=1 \
 EXPOSE 5000
 
 # Default command (can be overridden)
-CMD ["python", "main_v2.2.py"]
+CMD ["aikeyscan"]

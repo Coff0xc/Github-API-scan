@@ -1,7 +1,6 @@
 """扫描线程用 queue.Queue.put(timeout=)，验证协程用 take_queued_result。"""
 
 import asyncio
-import importlib.util
 import os
 import queue
 import threading
@@ -11,11 +10,9 @@ from validator_optimized import take_queued_result
 
 
 def _load_main():
-    path = os.path.join(os.path.dirname(__file__), "main_v2.2.py")
-    spec = importlib.util.spec_from_file_location("main_v2_2", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    import scanner_main
+
+    return scanner_main
 
 
 KEY = "sk-proj-Qw9Rt8Yu7Ip6Lk5Jh4Gf3Ds2Az1Xc0Vb"
@@ -31,7 +28,7 @@ def _item():
 
 
 def test_remote_main_uses_sync_queue():
-    path = os.path.join(os.path.dirname(__file__), "main_v2.2.py")
+    path = os.path.join(os.path.dirname(__file__), "scanner_main.py")
     with open(path, encoding="utf-8") as handle:
         source = handle.read().replace("\r\n", "\n")
     assert "queue.Queue(maxsize=10000)" in source

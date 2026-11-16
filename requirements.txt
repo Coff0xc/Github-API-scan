@@ -1,5 +1,6 @@
 # GitHub Secret Scanner Pro - 依赖列表（版本已钉死，升级前先跑 test_*.py）
-# 安装命令: pip install -r requirements.txt
+# 安装命令: pip install -e ".[dev]"
+# 仅运行时: pip install -e .  或  pip install -r requirements.txt
 #
 # 重要提示：
 #   pip install aiohttp[speedups] aiodns
@@ -51,5 +52,6 @@ Flask==3.0.3
 flask-cors==4.0.1
 
 # ========== 开发/测试依赖（运行扫描不需要）==========
-# pytest>=8.0
-# pytest-asyncio>=0.23  (pytest.ini 已配置 asyncio_mode = auto)
+# 安装: pip install -e ".[dev]"  （pyproject.toml 为源）
+pytest>=8.0,<9
+pytest-asyncio>=0.23,<2

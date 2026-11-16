@@ -32,6 +32,11 @@ __pycache__/
 *$py.class
 *.so
 .Python
+*.egg-info/
+.eggs/
+dist/
+build/
+.pytest_cache/
 
 # Virtual environments
 venv/

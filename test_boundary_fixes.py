@@ -97,6 +97,7 @@ def test_scoped_scan_still_requires_encryption():
 def test_single_entry_point():
     for script in ("main.py", "main_v2.1.py", "main_optimized.py"):
         assert not (ROOT / script).exists()
+    assert (ROOT / "scanner_main.py").exists()
     result = _run_entry("main_v2.2.py", "--help")
     combined = result.stdout + result.stderr
     assert "allow-public-sources" in combined

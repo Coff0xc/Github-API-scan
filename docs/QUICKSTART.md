@@ -1,6 +1,6 @@
 # Quick start
 
-One entry point: `main_v2.2.py`. A remote search runs only inside the organization or repository you name.
+Installable entry: `aikeyscan`. `python main_v2.2.py` is the same command. A remote search runs only inside the organization or repository you name.
 
 ## Install
 
@@ -9,7 +9,7 @@ Python 3.10 or newer.
 ```bash
 git clone https://github.com/Coff0xc/Github-API-scan.git
 cd Github-API-scan
-pip install -r requirements.txt
+pip install -e ".[dev]"
 ```
 
 On Windows, skip `uvloop` if a dependency mentions it.
@@ -33,9 +33,9 @@ The GitHub token needs read access to the organization or repository you are aud
 Confirm [AUTHORIZED_USE.md](../AUTHORIZED_USE.md) with `--authorized`, or set `SCANNER_AUTHORIZED=1` in CI.
 
 ```bash
-python main_v2.2.py --authorized --target-org your-org
-python main_v2.2.py --authorized --target-repo owner/name
-python main_v2.2.py --authorized --scan-local D:\repos\target
+aikeyscan --authorized --target-org your-org
+aikeyscan --authorized --target-repo owner/name
+aikeyscan --authorized --scan-local D:\repos\target
 ```
 
 `--target-repo` is `owner/name`. Without one of those two flags, GitHub search does not start. When the scan finishes it writes `findings.json`: fingerprint, platform, masked preview, location, and disposition. No full key, no balance.
@@ -51,9 +51,9 @@ The page is `http://127.0.0.1:5000`.
 ## Look at what you already have
 
 ```bash
-python main_v2.2.py --stats
-python main_v2.2.py --findings-json findings.json
-python main_v2.2.py --export results.txt --status valid
+aikeyscan --stats
+aikeyscan --findings-json findings.json
+aikeyscan --export results.txt --status valid
 ```
 
 Text and CSV are masked. A full key in an export requires `--reveal`. `findings.json` is for a person or an agent, and it never contains a raw key. See [AGENT_PIPELINE.md](AGENT_PIPELINE.md).
