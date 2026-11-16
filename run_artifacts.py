@@ -147,7 +147,7 @@ def render_run_markdown(document: dict, run_id: str = "") -> str:
                 )
             )
     lines.append("")
-    lines.append("This file has no raw keys. Mark rotated with `--set-disposition <fingerprint> rotated`.")
+    lines.append("This file has no raw keys. Mark rotated with `aikeyscan disposition <fingerprint> rotated`.")
     lines.append("")
     return "\n".join(lines)
 

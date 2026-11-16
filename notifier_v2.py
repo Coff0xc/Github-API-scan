@@ -78,6 +78,7 @@ class KeyInfo:
     model_tier: str = ""        # GPT-4, GPT-3.5, Claude-3, etc.
     rpm: int = 0                # Rate limit
     source_url: str = ""        # GitHub 来源链接
+    fingerprint: str = ""       # SHA-256 hex; same id used for disposition
     found_time: datetime = field(default_factory=datetime.now)
 
     @property
@@ -690,6 +691,7 @@ class FileChannel(NotificationChannel):
 
         content = disclosure_notice(
             key_info.platform, key_info.masked_key, key_info.source_url,
+            fingerprint=key_info.fingerprint,
         ) + "\n"
 
         try:
@@ -1001,7 +1003,10 @@ class NotifierV2:
         from findings_feed import disclosure_notice
 
         preview = key_info.masked_key
-        text = disclosure_notice(key_info.platform, preview, key_info.source_url)
+        text = disclosure_notice(
+            key_info.platform, preview, key_info.source_url,
+            fingerprint=key_info.fingerprint,
+        )
         if key_info.api_key and key_info.api_key in text:
             text = text.replace(key_info.api_key, preview)
         try:

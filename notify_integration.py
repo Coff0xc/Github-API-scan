@@ -49,7 +49,12 @@ async def disclose_finding(db_path: str, platform: str, api_key: str, source_url
     from database import Database
 
     fingerprint = vault.hash_key(api_key)
-    key_info = KeyInfo(platform=platform or "", api_key=api_key, source_url=source_url or "")
+    key_info = KeyInfo(
+        platform=platform or "",
+        api_key=api_key,
+        source_url=source_url or "",
+        fingerprint=fingerprint,
+    )
     try:
         results = await notifier.notify(key_info)
     except Exception as exc:

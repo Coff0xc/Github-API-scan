@@ -33,9 +33,9 @@ The GitHub token needs read access to the organization or repository you are aud
 Confirm [AUTHORIZED_USE.md](../AUTHORIZED_USE.md) with `--authorized`, or set `SCANNER_AUTHORIZED=1` in CI.
 
 ```bash
-aikeyscan --authorized --target-org your-org
-aikeyscan --authorized --target-repo owner/name
-aikeyscan --authorized --scan-local D:\repos\target
+aikeyscan scan --authorized --target-org your-org
+aikeyscan scan --authorized --target-repo owner/name
+aikeyscan scan --authorized --scan-local D:\repos\target --dashboard
 ```
 
 `--target-repo` is `owner/name`. Without one of those two flags, GitHub search does not start. When the scan finishes it writes `findings.json` and `.aikeyscan/runs/<id>/` (findings + markdown). `--format sarif` also writes `aikeyscan.sarif`. `--baseline findings.json` ignores known fingerprints in the exit code. `--since-ref <sha>` limits a local git scan to new commits. Logs redact key shapes unless you pass `--no-redact`. Exit 2 means a live key. No full key.
@@ -52,7 +52,7 @@ CI (after `actions/checkout` with `fetch-depth: 0`):
 Open the same rows in a browser:
 
 ```bash
-python web_dashboard.py
+aikeyscan dashboard
 ```
 
 The page is `http://127.0.0.1:5000`.

@@ -22,11 +22,11 @@ git clone https://github.com/Coff0xc/Github-API-scan.git
 cd Github-API-scan
 pip install -e ".[dev]"
 
-aikeyscan --authorized --target-org your-org
-aikeyscan --authorized --target-repo owner/name
-aikeyscan --authorized --scan-local ./your-repo
+aikeyscan scan --authorized --target-org your-org
+aikeyscan scan --authorized --target-repo owner/name
+aikeyscan scan --authorized --scan-local ./your-repo --dashboard
 
-python web_dashboard.py    # http://127.0.0.1:5000
+aikeyscan dashboard        # http://127.0.0.1:5000
 ```
 
 `python main_v2.2.py` still runs the same command.
@@ -254,9 +254,9 @@ Docker Compose does not pick an organization for you, and it does not set that y
 ## Run it
 
 ```bash
-aikeyscan --authorized --target-org your-org
-aikeyscan --authorized --target-repo owner/name
-aikeyscan --authorized --scan-local D:\repos\target
+aikeyscan scan --authorized --target-org your-org
+aikeyscan scan --authorized --target-repo owner/name
+aikeyscan scan --authorized --scan-local D:\repos\target --dashboard
 ```
 
 Each of those writes `findings.json` in the working directory and a run directory under `.aikeyscan/runs/<id>/` (`findings.json`, `report.md`). `--format sarif` also writes `aikeyscan.sarif`. `--baseline findings.json` keeps known fingerprints from failing CI. `--since-ref <sha>` limits a local git scan to new commits. Logs redact key shapes; `--no-redact` turns that off. `verification_kind` is `protocol` (OpenAI-compatible / Anthropic / Gemini / Azure), `generic_http`, or `match_only`. Exit code 2 means a live key was found; 1 is a config or authorization stop; 0 is a clean scan. Another path: `--findings-json reports/findings.json`. If you pass only that flag and no target, it exports the database you already have and exits.
@@ -278,7 +278,7 @@ Set `AI_FILTER_ENABLED=1` if you want a model to drop rows that look like exampl
 ## The page in the screenshot
 
 ```bash
-python web_dashboard.py
+aikeyscan dashboard
 ```
 
 Open `http://127.0.0.1:5000`. It binds to this machine only, unless you set `DASHBOARD_HOST`. Any other address puts the page on the network.
@@ -417,7 +417,7 @@ The program will not search the whole of GitHub, will not turn on public paste s
 ## Where the code for each step lives
 
 ```text
-aikeyscan / scanner_main.py   the command (script alias: main_v2.2.py)
+aikeyscan                   scan / dashboard / findings / disposition
 use_boundary.py         the yes-prompt and the scope check
 scanner.py              GitHub search, and pairing a key with its address
 local_scanner.py        a folder, and each unique Git file once

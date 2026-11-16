@@ -425,6 +425,14 @@ def show_stats(db_path: str):
 #                          主函数
 # ============================================================================
 
+def _open_dashboard(run_id: str) -> None:
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        return
+    from web_dashboard import serve
+    print(f"Opening dashboard for run {run_id or '(latest)'} at http://127.0.0.1:5000")
+    serve(db_path=config.db_path, run_id=run_id or "")
+
+
 def _emit_scan_artifacts(args, run_id: str) -> int:
     summary, code = write_scan_artifacts(
         config.db_path,
@@ -436,6 +444,8 @@ def _emit_scan_artifacts(args, run_id: str) -> int:
         baseline_path=getattr(args, "baseline", "") or "",
     )
     print(summary)
+    if getattr(args, "dashboard", False):
+        _open_dashboard(run_id)
     return code
 
 
@@ -521,6 +531,8 @@ v2.1 优化（保留）:
                         help='日志关闭密钥形态脱敏（默认开启）')
     parser.add_argument('--quiet', action='store_true',
                         help='关闭 TUI（GITHUB_ACTIONS 下自动开启）')
+    parser.add_argument('--dashboard', action='store_true',
+                        help='扫描结束后打开本机发现页（绑这次 run）')
 
     args = parser.parse_args()
     set_redact(not args.no_redact)

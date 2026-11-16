@@ -18,7 +18,7 @@ services:
     restart: unless-stopped
     # 远程扫描还要自行加上 --target-org 或 --target-repo，并设置 DB_ENCRYPTION_KEY。
     # 这里不给默认范围，避免容器一启动就搜索整个 GitHub。
-    command: aikeyscan
+    command: aikeyscan scan
 
   dashboard:
     build: .
@@ -37,7 +37,7 @@ services:
       - EXPORT_KEY=${EXPORT_KEY:-}
       - DB_ENCRYPTION_KEY=${DB_ENCRYPTION_KEY:-}
     restart: unless-stopped
-    command: python web_dashboard.py
+    command: aikeyscan dashboard --host 0.0.0.0
     depends_on:
       - scanner
 

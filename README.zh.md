@@ -21,11 +21,11 @@ git clone https://github.com/Coff0xc/Github-API-scan.git
 cd Github-API-scan
 pip install -e ".[dev]"
 
-aikeyscan --authorized --target-org your-org
-aikeyscan --authorized --target-repo owner/name
-aikeyscan --authorized --scan-local ./your-repo
+aikeyscan scan --authorized --target-org your-org
+aikeyscan scan --authorized --target-repo owner/name
+aikeyscan scan --authorized --scan-local ./your-repo --dashboard
 
-python web_dashboard.py    # http://127.0.0.1:5000
+aikeyscan dashboard        # http://127.0.0.1:5000
 ```
 
 `python main_v2.2.py` 仍是同一条命令。
@@ -37,8 +37,8 @@ python web_dashboard.py    # http://127.0.0.1:5000
 ## 三条常用命令
 
 ```bash
-aikeyscan --authorized --target-org your-org
-python web_dashboard.py
+aikeyscan scan --authorized --target-org your-org
+aikeyscan dashboard
 aikeyscan --findings-json findings.json
 ```
 

@@ -531,6 +531,18 @@ class Database:
                 conn.commit()
         return run_id
 
+    def latest_run_id(self) -> str:
+        """Most recently started scan run, or empty."""
+        with self._lock:
+            with self._get_connection() as conn:
+                try:
+                    row = conn.execute(
+                        "SELECT id FROM scan_runs ORDER BY rowid DESC LIMIT 1"
+                    ).fetchone()
+                except sqlite3.OperationalError:
+                    return ""
+                return (row[0] if row else "") or ""
+
     def finish_run(self, run_id: str, stats: Optional[dict] = None) -> None:
         if not run_id:
             return

@@ -97,14 +97,18 @@ def build_document(db_path: str, run_id: Optional[str] = None, live_only: bool =
     return document
 
 
-def disclosure_notice(platform: str, preview: str, location: str) -> str:
-    """给资产所有方的通知。只有平台、脱敏预览和位置。"""
-    return "\n".join((
+def disclosure_notice(platform: str, preview: str, location: str,
+                      fingerprint: str = "") -> str:
+    """给资产所有方的通知。平台、脱敏预览、位置和指纹。没有明文 Key。"""
+    lines = [
         f"平台: {platform or '未知'}",
         f"预览: {preview or ''}",
         f"位置: {location or '未知'}",
-        "请吊销该密钥。这条通知没有完整密钥，也没有余额。",
-    ))
+    ]
+    if fingerprint:
+        lines.append(f"指纹: {fingerprint}")
+    lines.append("请吊销该密钥。确认后执行 aikeyscan disposition <指纹> rotated。")
+    return "\n".join(lines)
 
 
 def write_findings(db_path: str, out_path: str) -> str:
@@ -115,7 +119,7 @@ def write_findings(db_path: str, out_path: str) -> str:
     return (
         f"已写出 {len(document['findings'])} 条发现: {out_path}\n"
         "  文件不含明文 Key。通知发出后会标为 notified。"
-        "确认吊销后执行 --set-disposition <指纹> rotated。"
+        "确认吊销后执行 aikeyscan disposition <指纹> rotated。"
     )
 
 

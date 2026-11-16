@@ -35,6 +35,7 @@ def client(tmp_path, monkeypatch):
     ))
 
     monkeypatch.setattr(web_dashboard.db_reader, "db_path", db_path)
+    monkeypatch.setattr(web_dashboard, "current_run_id", "")
     monkeypatch.setattr(web_dashboard, "DASHBOARD_TOKEN", TOKEN)
     monkeypatch.setattr(web_dashboard, "AUTH_ENABLED", True)
     monkeypatch.setattr(web_dashboard, "EXPORT_KEY_SECRET", "")

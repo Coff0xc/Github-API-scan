@@ -28,7 +28,7 @@ PROXY_URL=http://127.0.0.1:7890
 
 ### 3. Run with Docker Compose
 
-Compose does not set `SCANNER_AUTHORIZED`. Put `SCANNER_AUTHORIZED=1` in `.env` only after you accept AUTHORIZED_USE.md. Also set `DB_ENCRYPTION_KEY`. The scanner service command is `aikeyscan` with no default org, so it exits until you add `--target-org` or `--target-repo` to that command.
+Compose does not set `SCANNER_AUTHORIZED`. Put `SCANNER_AUTHORIZED=1` in `.env` only after you accept AUTHORIZED_USE.md. Also set `DB_ENCRYPTION_KEY`. The scanner service command is `aikeyscan scan` with no default org, so it exits until you add `--target-org` or `--target-repo` to that command. The dashboard service is `aikeyscan dashboard --host 0.0.0.0`.
 
 ```bash
 # Start both scanner and dashboard
@@ -72,7 +72,7 @@ docker run -d \
   -p 5000:5000 \
   -v $(pwd)/data:/app/data \
   api-key-scanner \
-  python web_dashboard.py
+  aikeyscan dashboard --host 0.0.0.0
 ```
 
 ---

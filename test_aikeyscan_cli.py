@@ -27,7 +27,7 @@ def _run(args, *, executable=None):
     )
 
 
-def _assert_help(result):
+def _assert_scan_help(result):
     combined = result.stdout + result.stderr
     assert result.returncode == 0
     assert "allow-public-sources" in combined
@@ -36,14 +36,24 @@ def _assert_help(result):
     assert "live-only" in combined
     assert "baseline" in combined
     assert "since-ref" in combined
+    assert "dashboard" in combined
+
+
+def _assert_root_help(result):
+    combined = result.stdout + result.stderr
+    assert result.returncode == 0
+    assert "scan" in combined
+    assert "dashboard" in combined
+    assert "disposition" in combined
 
 
 def test_script_help_still_works():
-    _assert_help(_run(["main_v2.2.py", "--help"]))
+    _assert_scan_help(_run(["main_v2.2.py", "--help"]))
 
 
 def test_module_help():
-    _assert_help(_run(["-m", "aikeyscan", "--help"]))
+    _assert_root_help(_run(["-m", "aikeyscan", "--help"]))
+    _assert_scan_help(_run(["-m", "aikeyscan", "scan", "--help"]))
 
 
 def test_console_script_help():
@@ -57,7 +67,15 @@ def test_console_script_help():
         text=True,
         timeout=60,
     )
-    _assert_help(result)
+    _assert_root_help(result)
+    scan = subprocess.run(
+        [exe, "scan", "--help"],
+        cwd=str(ROOT),
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    _assert_scan_help(scan)
 
 
 def test_cli_main_help_exits_zero():
@@ -65,4 +83,7 @@ def test_cli_main_help_exits_zero():
 
     with pytest.raises(SystemExit) as raised:
         main(["--help"])
+    assert raised.value.code == 0
+    with pytest.raises(SystemExit) as raised:
+        main(["scan", "--help"])
     assert raised.value.code == 0

@@ -132,10 +132,11 @@ def test_notice_and_channel_omit_secret():
     from findings_feed import disclosure_notice
     from notifier_v2 import KeyInfo, NotificationChannel, NotifierV2
 
-    text = disclosure_notice("openai", "sk-pro...cret", LOCATION)
+    text = disclosure_notice("openai", "sk-pro...cret", LOCATION, fingerprint="a" * 64)
     assert SECRET not in text
     assert LOCATION in text
-    assert "没有完整密钥" in text
+    assert "a" * 64 in text
+    assert "aikeyscan disposition" in text
 
     class Capture(NotificationChannel):
         def __init__(self):

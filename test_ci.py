@@ -166,7 +166,7 @@ def test_since_ref_missing_sets_error():
 
 def test_action_yaml_is_composite():
     text = Path("action.yml").read_text(encoding="utf-8")
-    assert "aikeyscan --authorized" in text
+    assert "aikeyscan scan --authorized" in text
     assert "--since-ref" in text
     assert "--baseline" in text
     assert "upload-sarif" in text

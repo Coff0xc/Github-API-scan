@@ -64,7 +64,7 @@ runs:
         if [ "${{ inputs.live-only }}" = "true" ]; then
           live+=(--live-only)
         fi
-        aikeyscan --authorized --allow-plaintext-db --quiet \
+        aikeyscan scan --authorized --allow-plaintext-db --quiet \
           --scan-local "${{ inputs.scan-path }}" \
           --format "${{ inputs.format }}" \
           "${live[@]}" "${extra[@]}"

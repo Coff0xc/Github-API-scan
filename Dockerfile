@@ -24,4 +24,4 @@ ENV PYTHONUNBUFFERED=1 \
 EXPOSE 5000
 
 # Default command (can be overridden)
-CMD ["aikeyscan"]
+CMD ["aikeyscan", "scan"]

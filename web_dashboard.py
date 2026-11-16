@@ -47,7 +47,12 @@ from flask_cors import CORS
 
 from key_vault import vault
 
-app = Flask(__name__)
+_APP_DIR = Path(__file__).resolve().parent
+app = Flask(
+    __name__,
+    template_folder=str(_APP_DIR / "templates"),
+    static_folder=str(_APP_DIR / "static"),
+)
 
 # CORS: 仍开放给本机前端调试；跨域读取 key 类接口受 token 保护
 CORS(app)
@@ -156,6 +161,13 @@ def _security_headers(resp):
     return resp
 
 
+def _run_sql():
+    rid = (current_run_id or "").strip()
+    if not rid:
+        return " WHERE 1=1", []
+    return " WHERE run_id = ?", [rid]
+
+
 class DatabaseReader:
     """Read-only database access for dashboard"""
 
@@ -171,12 +183,19 @@ class DatabaseReader:
         """Get overall statistics"""
         conn = self.get_connection()
         cursor = conn.cursor()
+        where, params = _run_sql()
+
+        def _count(extra=""):
+            return cursor.execute(
+                f"SELECT COUNT(*) FROM leaked_keys{where}{extra}", params
+            ).fetchone()[0]
 
         stats = {
-            'total_keys': cursor.execute('SELECT COUNT(*) FROM leaked_keys').fetchone()[0],
-            'valid_keys': cursor.execute('SELECT COUNT(*) FROM leaked_keys WHERE status = "valid"').fetchone()[0],
-            'invalid_keys': cursor.execute('SELECT COUNT(*) FROM leaked_keys WHERE status = "invalid"').fetchone()[0],
-            'quota_exceeded': cursor.execute('SELECT COUNT(*) FROM leaked_keys WHERE status = "quota_exceeded"').fetchone()[0],
+            'total_keys': _count(),
+            'valid_keys': _count(' AND status = "valid"'),
+            'invalid_keys': _count(' AND status = "invalid"'),
+            'quota_exceeded': _count(' AND status = "quota_exceeded"'),
+            'run_id': (current_run_id or "").strip(),
             'dispositions': {
                 'open': 0,
                 'notified': 0,
@@ -186,11 +205,14 @@ class DatabaseReader:
         }
 
         try:
-            cursor.execute('''
+            cursor.execute(
+                f'''
                 SELECT COALESCE(NULLIF(disposition, ''), 'open') AS disposition, COUNT(*) AS count
-                FROM leaked_keys
+                FROM leaked_keys{where}
                 GROUP BY 1
-            ''')
+                ''',
+                params,
+            )
             for row in cursor.fetchall():
                 name = row['disposition'] if isinstance(row, sqlite3.Row) else row[0]
                 count = row['count'] if isinstance(row, sqlite3.Row) else row[1]
@@ -199,13 +221,16 @@ class DatabaseReader:
         except sqlite3.OperationalError:
             pass
 
-        cursor.execute('''
+        cursor.execute(
+            f'''
             SELECT platform, COUNT(*) as count
-            FROM leaked_keys
+            FROM leaked_keys{where}
             GROUP BY platform
             ORDER BY count DESC
             LIMIT 10
-        ''')
+            ''',
+            params,
+        )
         stats['top_platforms'] = [dict(row) for row in cursor.fetchall()]
 
         conn.close()
@@ -217,8 +242,8 @@ class DatabaseReader:
         conn = self.get_connection()
         cursor = conn.cursor()
 
-        query = 'SELECT * FROM leaked_keys WHERE 1=1'
-        params = []
+        where, params = _run_sql()
+        query = f'SELECT * FROM leaked_keys{where}'
 
         if status:
             query += ' AND status = ?'
@@ -257,13 +282,18 @@ class DatabaseReader:
         """Get list of platforms"""
         conn = self.get_connection()
         cursor = conn.cursor()
-        cursor.execute('SELECT DISTINCT platform FROM leaked_keys ORDER BY platform')
+        where, params = _run_sql()
+        cursor.execute(
+            f'SELECT DISTINCT platform FROM leaked_keys{where} ORDER BY platform',
+            params,
+        )
         platforms = [row[0] for row in cursor.fetchall()]
         conn.close()
         return platforms
 
 
 db_reader = DatabaseReader(os.getenv("DB_PATH", "leaked_keys.db"))
+current_run_id = ""
 
 
 # ============================================================================
@@ -311,7 +341,8 @@ def api_keys():
 def api_findings():
     """代理只读发现。永远不含明文 Key，忽略任何 reveal 参数。"""
     from findings_feed import build_document
-    return jsonify(build_document(db_reader.db_path))
+    rid = (current_run_id or "").strip() or None
+    return jsonify(build_document(db_reader.db_path, run_id=rid))
 
 
 @app.route('/api/findings/disposition', methods=['POST'])
@@ -405,6 +436,45 @@ def api_stats_update():
         if key in data:
             current_stats[key] = data[key]
     return jsonify({'status': 'ok'})
+
+
+def configure(db_path: str = "", run_id: str = None, host: str = None) -> str:
+    """Point the panel at a database and optional run. Returns the bound run id."""
+    global current_run_id, DASHBOARD_HOST
+    if db_path:
+        db_reader.db_path = db_path
+    if host:
+        DASHBOARD_HOST = host
+    if run_id is None:
+        return current_run_id
+    current_run_id = (run_id or "").strip()
+    return current_run_id
+
+
+def serve(db_path: str = "", run_id: str = "", host: str = None, port: int = 5000,
+          all_runs: bool = False) -> None:
+    """Start the local findings page. Default run is the latest scan."""
+    path = db_path or db_reader.db_path
+    bound = ""
+    if all_runs:
+        configure(db_path=path, run_id="")
+    elif run_id:
+        bound = configure(db_path=path, run_id=run_id)
+    else:
+        from database import Database
+        bound = Database(path).latest_run_id()
+        configure(db_path=path, run_id=bound)
+    bind_host = host or DASHBOARD_HOST
+    if AUTH_ENABLED:
+        print("Auth: ENABLED (DASHBOARD_TOKEN set)")
+    else:
+        print("Auth: read-only masked findings (set DASHBOARD_TOKEN to change rows)")
+    if bound:
+        print(f"Run: {bound}")
+    else:
+        print("Run: all findings")
+    print(f"Access at: http://{bind_host}:{port}")
+    run_server(host=bind_host, port=port)
 
 
 def run_server(host=None, port=5000):
