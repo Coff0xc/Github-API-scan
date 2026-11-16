@@ -9,8 +9,8 @@ The raw key stays on the machine that ran the scan.
 <p align="center">
   <img src="https://img.shields.io/badge/python-3.10+-3776AB?logo=python&logoColor=white" alt="Python 3.10+">
   <img src="https://img.shields.io/badge/license-MIT-111827" alt="MIT license">
-  <img src="https://img.shields.io/badge/entry-aikeyscan-1d4ed8" alt="Entry point aikeyscan">
-  &nbsp;<a href="README.zh.md">中文</a>
+  <img src="https://img.shields.io/badge/entry-main__v2.2.py-1d4ed8" alt="Entry point main_v2.2.py">
+  &nbsp;<a href="README.zh.md">Chinese</a>
 </p>
 
 <p align="center">
@@ -20,25 +20,23 @@ The raw key stays on the machine that ran the scan.
 ```bash
 git clone https://github.com/Coff0xc/Github-API-scan.git
 cd Github-API-scan
-pip install -e ".[dev]"
+pip install -r requirements.txt
 
-aikeyscan scan --authorized --target-org your-org
-aikeyscan scan --authorized --target-repo owner/name
-aikeyscan scan --authorized --scan-local ./your-repo --dashboard
+python main_v2.2.py --authorized --target-org your-org
+python main_v2.2.py --authorized --target-repo owner/name
+python main_v2.2.py --authorized --scan-local ./your-repo
 
-aikeyscan dashboard        # http://127.0.0.1:5000
+python web_dashboard.py    # http://127.0.0.1:5000
 ```
-
-`python main_v2.2.py` still runs the same command.
 
 How a row is built: extract key shapes from the file (and unique git blobs for a local history scan) → drop test/example strings by entropy and path → keep the longest match when two patterns overlap → bind the nearest `base_url` / `OPENAI_BASE_URL` → check that host (SSRF: no private/link-local/reserved addresses; loopback is allowed for a local relay) → one SQLite write with the final status. Patterns are compiled once at import. Remote search does not start without `--target-org` or `--target-repo`. Pass `--authorized` after [AUTHORIZED_USE.md](AUTHORIZED_USE.md).
 
 | If you own the code | If you run the scan |
 | --- | --- |
-| Open `http://127.0.0.1:5000` after someone else has scanned. | Run `aikeyscan` and name the organization or the folder. |
+| Open `http://127.0.0.1:5000` after someone else has scanned. | Run `python main_v2.2.py` and name the organization or the folder. |
 | Each row is one place a key showed up: the service, a shortened preview, and the file. | When it finishes, the same rows are in `findings.json`. |
 | Tell the owner those three things. Do not paste the real key into chat. | The real key stays in the local database, scrambled if you set a passphrase. |
-| After the key is revoked, mark the row **Rotated**. If it was only an example, mark it **False alarm**. | The header of the page switches between **EN** and **中文**. |
+| After the key is revoked, mark the row **Rotated**. If it was only an example, mark it **False alarm**. | The header of the page switches between **EN** and **Chinese**. |
 
 ## A scan, from the top
 
@@ -173,8 +171,8 @@ stateDiagram-v2
 | False alarm | `false_positive` | A person, when the text was a sample or not a secret. |
 
 ```bash
-aikeyscan --set-disposition <64-hex-id> rotated
-aikeyscan --apply-dispositions dispositions.json
+python main_v2.2.py --set-disposition <64-hex-id> rotated
+python main_v2.2.py --apply-dispositions dispositions.json
 ```
 
 A batch file looks like this. Extra fields are ignored. The id still has to be 64 hex characters. A bare list, or an object whose list is named `findings`, is also accepted.
@@ -212,7 +210,7 @@ Python 3.10 or newer.
 ```bash
 git clone https://github.com/Coff0xc/Github-API-scan.git
 cd Github-API-scan
-pip install -e ".[dev]"
+pip install -r requirements.txt
 ```
 
 On Windows, if a package tries to install `uvloop`, skip it. The scanner does not need it.
@@ -249,36 +247,26 @@ Settings are layered. Later wins: built-in defaults, then `config.yaml`, then `c
 
 Before a scan, the program wants a yes. `--authorized` is that yes, after you have read [AUTHORIZED_USE.md](AUTHORIZED_USE.md). In CI, set `SCANNER_AUTHORIZED=1`. In a terminal, with neither, it asks you to type `y`. A script with neither stops.
 
-Docker Compose does not pick an organization for you, and it does not set that yes. The scanner service's command is `aikeyscan`, so a container started from the file as written will stop at the scope check. Override the command with `--authorized` and a target, and set `DB_ENCRYPTION_KEY`. The dashboard container publishes `127.0.0.1:5000` on the host. Inside the container it listens on `0.0.0.0`, which is acceptable only because the published port is still this machine. Opening that port on a LAN means you need a strong dashboard token. See [docs/DOCKER_GUIDE.md](docs/DOCKER_GUIDE.md).
+Docker Compose does not pick an organization for you, and it does not set that yes. The scanner service's command is `python main_v2.2.py`, so a container started from the file as written will stop at the scope check. Override the command with `--authorized` and a target, and set `DB_ENCRYPTION_KEY`. The dashboard container publishes `127.0.0.1:5000` on the host. Inside the container it listens on `0.0.0.0`, which is acceptable only because the published port is still this machine. Opening that port on a LAN means you need a strong dashboard token. See [docs/DOCKER_GUIDE.md](docs/DOCKER_GUIDE.md).
 
 ## Run it
 
 ```bash
-aikeyscan scan --authorized --target-org your-org
-aikeyscan scan --authorized --target-repo owner/name
-aikeyscan scan --authorized --scan-local D:\repos\target --dashboard
+python main_v2.2.py --authorized --target-org your-org
+python main_v2.2.py --authorized --target-repo owner/name
+python main_v2.2.py --authorized --scan-local D:\repos\target
 ```
 
-Each of those writes `findings.json` in the working directory and a run directory under `.aikeyscan/runs/<id>/` (`findings.json`, `report.md`). `--format sarif` also writes `aikeyscan.sarif`. `--baseline findings.json` keeps known fingerprints from failing CI. `--since-ref <sha>` limits a local git scan to new commits. Logs redact key shapes; `--no-redact` turns that off. `verification_kind` is `protocol` (OpenAI-compatible / Anthropic / Gemini / Azure), `generic_http`, or `match_only`. Exit code 2 means a live key was found; 1 is a config or authorization stop; 0 is a clean scan. Another path: `--findings-json reports/findings.json`. If you pass only that flag and no target, it exports the database you already have and exits.
+Each of those writes `findings.json` in the working directory. Another path: `--findings-json reports/findings.json`. If you pass only that flag and no target, it exports the database you already have and exits.
 
-```yaml
-- uses: actions/checkout@v4
-  with:
-    fetch-depth: 0
-- uses: Coff0xc/Github-API-scan@main
-  with:
-    since-ref: ${{ github.event.pull_request.base.sha }}
-    baseline: .aikeyscan-baseline.json
-```
-
-While the scan runs, the terminal title is **AI API Key Scanner**. The table under the counters is **发现记录**: service, shortened preview, status, and place. It is the same idea as the screenshot, in the terminal. There is no balance column.
+While the scan runs, the terminal title is **AI API Key Scanner**. The table under the counters is **Findings**: service, shortened preview, status, and place. It is the same idea as the screenshot, in the terminal. There is no balance column.
 
 Set `AI_FILTER_ENABLED=1` if you want a model to drop rows that look like examples. It is off unless you turn it on. See [docs/AI_ASSISTED_ANALYSIS.md](docs/AI_ASSISTED_ANALYSIS.md).
 
 ## The page in the screenshot
 
 ```bash
-aikeyscan dashboard
+python web_dashboard.py
 ```
 
 Open `http://127.0.0.1:5000`. It binds to this machine only, unless you set `DASHBOARD_HOST`. Any other address puts the page on the network.
@@ -322,7 +310,7 @@ Copy `notify_config.example.yaml` when you want a file, or set `NOTIFY_CONFIG` t
 A Markdown report for the same review:
 
 ```bash
-aikeyscan --authorized --report threat.md
+python main_v2.2.py --authorized --report threat.md
 ```
 
 It lists keys that came back valid or out of quota, newest first. Each line has the service, the status, the shortened preview, the place, and the time. Model name and requests-per-minute show up only when the check actually returned them. They do not change the order. `--reveal-report` prints full keys into that file. Keep it out of git.
@@ -332,12 +320,12 @@ Grok Bot and Muse can read `findings.json` or `GET /api/findings`, group rows by
 ## Everyday commands
 
 ```bash
-aikeyscan --stats
-aikeyscan --findings-json findings.json
-aikeyscan --export results.txt --status valid
-aikeyscan --export-csv results.csv --status valid
-aikeyscan --export-encrypted secure.bin
-aikeyscan --authorized --report threat.md
+python main_v2.2.py --stats
+python main_v2.2.py --findings-json findings.json
+python main_v2.2.py --export results.txt --status valid
+python main_v2.2.py --export-csv results.csv --status valid
+python main_v2.2.py --export-encrypted secure.bin
+python main_v2.2.py --authorized --report threat.md
 ```
 
 Text and CSV are shortened. `--reveal` writes full keys into an export. Do not commit that file.
@@ -417,7 +405,7 @@ The program will not search the whole of GitHub, will not turn on public paste s
 ## Where the code for each step lives
 
 ```text
-aikeyscan                   scan / dashboard / findings / disposition
+main_v2.2.py            the only command
 use_boundary.py         the yes-prompt and the scope check
 scanner.py              GitHub search, and pairing a key with its address
 local_scanner.py        a folder, and each unique Git file once

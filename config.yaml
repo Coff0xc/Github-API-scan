@@ -1,66 +1,66 @@
-# GitHub Secret Scanner Pro - 配置文件
-# 外部化配置,便于调整参数
+# GitHub Secret Scanner Pro - configuration file
+# Externalized configuration, so parameters are easy to adjust
 
 # ============================================================================
-#                          扫描器配置
+#                          Scanner settings
 # ============================================================================
 scanner:
-  # 熵值阈值 (低于此值的 Key 视为测试数据)
+  # Entropy threshold (keys below this are treated as test data)
   entropy_threshold: 3.8
 
-  # 最大文件大小 (KB)
+  # Maximum file size (KB)
   max_file_size_kb: 500
 
-  # 异步下载并发数
+  # Async download concurrency
   async_download_concurrency: 60
 
-  # 上下文窗口 (前后各 N 行)
+  # Context window (N lines before and after)
   context_window: 10
 
 # ============================================================================
-#                          验证器配置
+#                          Validator settings
 # ============================================================================
 validator:
-  # 最大并发数
+  # Maximum concurrency
   max_concurrency: 100
 
-  # 请求超时 (秒)
+  # Request timeout (seconds)
   request_timeout: 15
 
-  # 工作线程数
+  # Worker thread count
   num_workers: 2
 
 # ============================================================================
-#                          数据库配置
+#                          Database settings
 # ============================================================================
 database:
-  # 数据库路径
+  # Database path
   db_path: "leaked_keys.db"
 
-  # 批量写入大小
+  # Batch write size
   batch_size: 50
 
-  # 刷新间隔 (秒)
+  # Flush interval (seconds)
   flush_interval: 5.0
 
 # ============================================================================
-#                          熔断器配置
+#                          Circuit breaker settings
 # ============================================================================
 circuit_breaker:
-  # 是否启用
+  # Whether enabled
   enabled: true
 
-  # 连续失败次数阈值
+  # Consecutive-failure threshold
   failure_threshold: 5
 
-  # 熔断恢复时间 (秒)
+  # Circuit-breaker recovery time (seconds)
   recovery_timeout: 60
 
-  # 半开状态允许的试探请求数
+  # Probe requests allowed while half-open
   half_open_requests: 3
 
 # ============================================================================
-#                          域名黑名单
+#                          Domain blacklist
 # ============================================================================
 blacklist:
   domains:
@@ -126,10 +126,10 @@ blacklist:
     - /starter/
 
 # ============================================================================
-#                          文件扩展名过滤
+#                          File extension filtering
 # ============================================================================
 file_filter:
-  # 允许的扩展名
+  # Allowed extensions
   allowed_extensions:
     - .py
     - .js
@@ -156,7 +156,7 @@ file_filter:
     - .ini
     - .dockerfile
 
-  # 必须屏蔽的扩展名
+  # Extensions that must be blocked
   blocked_extensions:
     - .lock
     - .min.js
@@ -200,27 +200,27 @@ file_filter:
     - .csv
 
 # ============================================================================
-#                          性能监控
+#                          Performance monitoring
 # ============================================================================
 monitoring:
-  # 是否启用 Prometheus 指标
+  # Whether Prometheus metrics are enabled
   enable_prometheus: false
 
-  # Prometheus 端口
+  # Prometheus port
   prometheus_port: 8000
 
-  # 统计输出间隔 (秒)
+  # Stats output interval (seconds)
   stats_interval: 60
 
 # ============================================================================
-#                          日志配置
+#                          Logging settings
 # ============================================================================
 logging:
-  # 日志级别 (DEBUG/INFO/WARNING/ERROR)
+  # Log level (DEBUG/INFO/WARNING/ERROR)
   level: INFO
 
-  # 是否输出到文件
+  # Whether to log to a file
   log_to_file: false
 
-  # 日志文件路径
+  # Log file path
   log_file: "scanner.log"

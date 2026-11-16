@@ -33,19 +33,19 @@ The header is **AI API Key Scanner**. Next to it are the run state, which GitHub
 
 The stats panel counts files scanned, candidates found, valid hits, invalid results, quota hits, connection errors, and the validation queue.
 
-The table under that is titled **发现记录**. The columns are platform, masked preview, status, and location. A row appears when a check comes back valid. There is no balance column and no high-value marker. The log beside it is the same run in text: searches, skips, and valid or quota lines.
+The table under that is titled **Findings**. The columns are platform, masked preview, status, and location. A row appears when a check comes back valid. There is no balance column and no high-value marker. The log beside it is the same run in text: searches, skips, and valid or quota lines.
 
 The picture below is the shape of that screen, not a capture of a real scan.
 
 ```text
 ┌ AI API Key Scanner ──────────────────────────────┐
-│ 运行中 │ Tokens: 1/2 │ 代理: 直连模式            │
+│ Running │ Tokens: 1/2 │ Proxy: direct            │
 ├──────────────────────┬───────────────────────────┤
-│ 扫描文件          40 │ [10:01:12] [SCAN] acme    │
-│ 有效命中           2 │ [10:01:40] [VALID] openai │
+│ Files scanned     40 │ [10:01:12] [SCAN] acme    │
+│ Valid hits         2 │ [10:01:40] [VALID] openai │
 ├──────────────────────┴───────────────────────────┤
-│ 发现记录                                          │
-│ 平台     预览            状态    位置             │
+│ Findings                                         │
+│ Platform Preview         Status  Location        │
 │ openai   sk-pro...k9Q2   valid   acme-labs/...env │
 └───────────────────────────────────────────────────┘
 ```

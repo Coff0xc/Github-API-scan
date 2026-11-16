@@ -1,7 +1,7 @@
-# 关于旧的性能数字
+# About the old performance numbers
 
-这里以前写过「3–5 倍」「100–430 倍」和一张 0.24 秒的对比表。那些数字不能复现为一次完整扫描，已经从仓库里撤掉。
+This page used to quote "3–5×", "100–430×", and a comparison table showing 0.24 seconds. Those numbers cannot be reproduced as one complete scan, and have been removed from the repository.
 
-`benchmark.py` 只计时合成行的 SQLite 插入。它不搜索 GitHub，也不请求模型厂商。
+`benchmark.py` only times synthetic-row SQLite inserts. It does not search GitHub, and it does not call any model vendor.
 
-入口、范围和导出行为以 [README](../README.md) 和 [QUICKSTART.md](QUICKSTART.md) 为准。
+Entry point, scope, and export behavior follow [README](../README.md) and [QUICKSTART.md](QUICKSTART.md).

@@ -1,84 +1,84 @@
-# AI 辅助检测模块 使用说明
+# AI-Assisted Detection Module — User Guide
 
-## 概述
+## Overview
 
-AI 辅助检测模块使用大语言模型 (LLM) 进行上下文感知的 API Key 检测，能够显著降低假阳性率。
+The AI-assisted detection module uses a large language model (LLM) for context-aware API key detection, and can cut the false-positive rate significantly.
 
-**核心优势**:
-- 🎯 **94% 假阳性减少** - 参考 GitHub Copilot MetaReflection 技术
-- 🧠 **上下文感知** - 理解代码语义，识别真实 vs 测试 Key
-- ⚡ **双层过滤** - 规则引擎快速筛选 + AI 深度分析
-- 💰 **成本优化** - 优先使用本地 Ollama，节省 API 费用
+**Key strengths**:
+- 🎯 **94% fewer false positives** - based on GitHub Copilot MetaReflection
+- 🧠 **Context-aware** - understands code semantics and tells real keys apart from test keys
+- ⚡ **Two-layer filtering** - fast rule-engine screening + in-depth AI analysis
+- 💰 **Cost-optimized** - prefers local Ollama, saving API fees
 
-## 架构
+## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    SmartDetector (智能检测器)                │
+│ SmartDetector (Smart Detector)                              │
 ├────────────────────────────┬────────────────────────────────┤
 │      QuickFilter           │         AIDetector             │
-│      (规则引擎)             │         (LLM 分析)             │
+│ (Rule engine)              │ (LLM analysis)                 │
 │                            │                                │
-│  • 测试模式检测            │  • Ollama 本地模型             │
-│  • 熵值计算                │  • OpenAI API                  │
-│  • 重复模式识别            │  • Few-shot 提示               │
-│  • 文件路径分析            │  • Chain of Thought            │
+│ • Test-pattern detection   │ • Local Ollama model           │
+│ • Entropy calculation      │ • OpenAI API                   │
+│ • Duplicate-pattern check  │ • Few-shot prompts             │
+│ • File-path analysis       │ • Chain of Thought             │
 └────────────────────────────┴────────────────────────────────┘
                               │
                               ▼
                     ┌──────────────────┐
-                    │   检测结果        │
-                    │  • 置信度         │
-                    │  • Key 类型       │
-                    │  • 平台识别       │
-                    │  • 推理过程       │
+                    │ Detection result │
+                    │  • Confidence    │
+                    │  • Key type      │
+                    │  • Platform      │
+                    │  • Reasoning     │
                     └──────────────────┘
 ```
 
-## 快速开始
+## Quick start
 
-### 1. 安装 Ollama (推荐)
+### 1. Install Ollama (recommended)
 
 ```bash
 # Linux/Mac
 curl -fsSL https://ollama.ai/install.sh | sh
 
 # Windows
-# 从 https://ollama.ai/download 下载安装
+# Download and install from https://ollama.ai/download
 
-# 拉取模型 (选择一个)
-ollama pull llama3.2:3b    # 快速，适合初筛 (推荐)
-ollama pull llama3.1:8b    # 平衡
-ollama pull qwen2.5:7b     # 中文友好
-ollama pull mistral:7b     # 高质量
+# Pull a model (pick one)
+ollama pull llama3.2:3b    # Fast, good for first-pass screening (recommended)
+ollama pull llama3.1:8b    # Balanced
+ollama pull qwen2.5:7b     # Good with Chinese text
+ollama pull mistral:7b     # High quality
 
-# 验证
+# Verify
 ollama list
 ```
 
-### 2. 运行测试
+### 2. Run the tests
 
 ```bash
-# 检查后端可用性
+# Check backend availability
 python check_ai_detector.py --check
 
-# 运行完整测试
+# Run the full test suite
 python check_ai_detector.py --all
 
-# 交互式测试
+# Interactive test
 python check_ai_detector.py --interactive
 ```
 
-### 3. 在代码中使用
+### 3. Using it in code
 
 ```python
 from ai_detector import SmartDetector, CodeContext
 
-# 创建检测器
+# Create the detector
 detector = SmartDetector()
 await detector.initialize()
 
-# 分析代码片段
+# Analyze a code snippet
 context = CodeContext(
     code_snippet='''
     OPENAI_API_KEY = "sk-proj-abc123..."
@@ -93,99 +93,99 @@ should_validate, result = await detector.should_validate(
 )
 
 if should_validate:
-    print(f"应该验证: {result.provider} Key")
+    print(f"Should validate: {result.provider} Key")
 else:
-    print(f"跳过: {result.reasoning}")
+    print(f"Skip: {result.reasoning}")
 ```
 
-## 检测结果
+## Detection results
 
-### 置信度级别
+### Confidence levels
 
-| 级别 | 说明 | 处理建议 |
+| Level | Meaning | Recommended action |
 |------|------|---------|
-| `HIGH` | 高度确信是真实 Key | 立即验证 |
-| `MEDIUM` | 较可能是真实 Key | 验证 |
-| `LOW` | 可能是 Key，但不确定 | 可选验证 |
-| `NONE` | 不是 API Key | 跳过 |
+| `HIGH` | Highly confident this is a real key | Validate immediately |
+| `MEDIUM` | Likely a real key | Validate |
+| `LOW` | Might be a key, but uncertain | Optional validation |
+| `NONE` | Not an API key | Skip |
 
-### Key 类型
+### Key types
 
-| 类型 | 说明 | 示例 |
+| Type | Meaning | Example |
 |------|------|------|
-| `REAL` | 真实 Key | 配置文件中的 Key |
-| `TEST` | 测试 Key | `sk-test-xxx` |
-| `EXAMPLE` | 示例 Key | 文档中的示例 |
-| `PLACEHOLDER` | 占位符 | `YOUR_API_KEY` |
-| `FAKE` | 明显假的 Key | `sk-xxxxxxxxxxxx` |
+| `REAL` | Real key | A key in a config file |
+| `TEST` | Test key | `sk-test-xxx` |
+| `EXAMPLE` | Example key | An example in documentation |
+| `PLACEHOLDER` | Placeholder | `YOUR_API_KEY` |
+| `FAKE` | Clearly fake key | `sk-xxxxxxxxxxxx` |
 
-## 配置
+## Configuration
 
-### 环境变量
+### Environment variables
 
 ```bash
-# AI 检测器开关
+# AI detector switch
 export AI_DETECTOR_ENABLED=true
 
-# 后端选择: ollama, openai, mock
+# Backend: ollama, openai, mock
 export AI_DETECTOR_BACKEND=ollama
 
-# Ollama 配置
+# Ollama settings
 export OLLAMA_URL=http://localhost:11434
 export OLLAMA_MODEL=llama3.2:3b
 
-# OpenAI 配置 (备选)
+# OpenAI settings (fallback)
 export OPENAI_API_KEY=sk-xxx
 export OPENAI_MODEL=gpt-3.5-turbo
 
-# 快速过滤器
+# Quick filter
 export AI_QUICK_FILTER=true
 
-# 缓存
+# Cache
 export AI_CACHE_ENABLED=true
 export AI_CACHE_SIZE=1000
 ```
 
-### YAML 配置
+### YAML configuration
 
-在 `notify_config.yaml` 中添加:
+Add to `notify_config.yaml`:
 
 ```yaml
 ai_detector:
   enabled: true
   backend: ollama  # ollama, openai, mock
 
-  # Ollama 配置
+  # Ollama settings
   ollama_url: http://localhost:11434
   ollama_model: llama3.2:3b
 
-  # OpenAI 配置 (备选)
+  # OpenAI settings (fallback)
   openai_api_key: ""
   openai_model: gpt-3.5-turbo
 
-  # 快速过滤器
+  # Quick filter
   quick_filter_enabled: true
 
-  # 缓存
+  # Cache
   cache_enabled: true
   cache_size: 1000
 ```
 
-## 集成到 Scanner
+## Integrating with the Scanner
 
-### 方式一: 直接使用
+### Option 1: Use it directly
 
 ```python
 from ai_scanner_integration import ScannerAIIntegration
 
-# 创建集成实例
+# Create an integration instance
 ai_integration = ScannerAIIntegration(
     enable_ai=True,
     ollama_model="llama3.2:3b"
 )
 await ai_integration.initialize()
 
-# 过滤候选 Key
+# Filter candidate keys
 result = await ai_integration.filter_candidate(
     platform="openai",
     api_key="sk-proj-xxx",
@@ -194,13 +194,13 @@ result = await ai_integration.filter_candidate(
 )
 
 if result.should_validate:
-    # 继续验证
+    # Continue validation
     pass
 else:
-    print(f"AI 过滤: {result.filter_reason}")
+    print(f"AI filter: {result.filter_reason}")
 ```
 
-### 方式二: 便捷函数
+### Option 2: Convenience function
 
 ```python
 from ai_scanner_integration import should_validate_key
@@ -212,11 +212,11 @@ should_validate, reason = await should_validate_key(
 )
 ```
 
-## 性能优化
+## Performance tuning
 
-### 1. 使用快速过滤器预筛选
+### 1. Pre-screen with the quick filter
 
-快速过滤器使用规则引擎，无需 LLM 调用:
+The quick filter uses a rule engine and needs no LLM call:
 
 ```python
 from ai_detector import QuickFilter
@@ -229,11 +229,11 @@ is_fake, reason = quick_filter.is_likely_fake(
 )
 
 if is_fake:
-    print(f"快速过滤: {reason}")
-    # 跳过 LLM 分析
+    print(f"Quick filter: {reason}")
+    # Skip LLM analysis
 ```
 
-### 2. 批量处理
+### 2. Batch processing
 
 ```python
 candidates = [
@@ -244,88 +244,88 @@ candidates = [
 results = await ai_integration.filter_batch(candidates, concurrency=10)
 ```
 
-### 3. 缓存
+### 3. Caching
 
-默认启用缓存，相同的代码片段+Key 组合只分析一次:
+Caching is on by default; the same snippet+key combination is analyzed only once:
 
 ```python
 detector = AIDetector(cache_enabled=True, cache_size=1000)
 ```
 
-## 测试命令
+## Test commands
 
 ```bash
-# 检查后端状态
+# Check backend status
 python check_ai_detector.py --check
 
-# 测试快速过滤器
+# Test the quick filter
 python check_ai_detector.py --quick
 
-# 测试 AI 检测器
+# Test the AI detector
 python check_ai_detector.py --backend ollama
 python check_ai_detector.py --backend openai
 python check_ai_detector.py --backend mock
 
-# 运行所有测试
+# Run all tests
 python check_ai_detector.py --all
 
-# 交互式测试
+# Interactive test
 python check_ai_detector.py --interactive
 ```
 
-## 推荐模型
+## Recommended models
 
-| 模型 | 大小 | 速度 | 质量 | 推荐场景 |
+| Model | Size | Speed | Quality | Best for |
 |------|------|------|------|---------|
-| `llama3.2:3b` | 2GB | ⚡⚡⚡ | ⭐⭐⭐ | 快速初筛 (推荐) |
-| `llama3.1:8b` | 5GB | ⚡⚡ | ⭐⭐⭐⭐ | 平衡 |
-| `qwen2.5:7b` | 4GB | ⚡⚡ | ⭐⭐⭐⭐ | 中文代码 |
-| `mistral:7b` | 4GB | ⚡⚡ | ⭐⭐⭐⭐⭐ | 高质量 |
-| `gpt-3.5-turbo` | - | ⚡ | ⭐⭐⭐⭐⭐ | 云端备选 |
+| `llama3.2:3b` | 2GB | ⚡⚡⚡ | ⭐⭐⭐ | Fast first-pass screening (recommended) |
+| `llama3.1:8b` | 5GB | ⚡⚡ | ⭐⭐⭐⭐ | Balanced |
+| `qwen2.5:7b` | 4GB | ⚡⚡ | ⭐⭐⭐⭐ | Chinese code |
+| `mistral:7b` | 4GB | ⚡⚡ | ⭐⭐⭐⭐⭐ | High quality |
+| `gpt-3.5-turbo` | - | ⚡ | ⭐⭐⭐⭐⭐ | Cloud fallback |
 
-## 文件清单
+## File list
 
 ```
-├── ai_detector.py              # AI 检测核心模块
-├── ai_scanner_integration.py   # Scanner 集成模块
-├── check_ai_detector.py         # 测试脚本
-└── AI_DETECTOR_README.md       # 本文档
+├── ai_detector.py              # AI detection core module
+├── ai_scanner_integration.py   # Scanner integration module
+├── check_ai_detector.py         # Test script
+└── AI_DETECTOR_README.md       # This document
 ```
 
-## 故障排除
+## Troubleshooting
 
-### Ollama 连接失败
+### Ollama connection failed
 
 ```bash
-# 检查 Ollama 服务
+# Check the Ollama service
 curl http://localhost:11434/api/tags
 
-# 重启 Ollama
+# Restart Ollama
 ollama serve
 ```
 
-### 模型不存在
+### Model not found
 
 ```bash
-# 列出已安装模型
+# List installed models
 ollama list
 
-# 拉取模型
+# Pull the model
 ollama pull llama3.2:3b
 ```
 
-### 检测结果不准确
+### Inaccurate detection results
 
-1. 尝试使用更大的模型 (`llama3.1:8b`)
-2. 检查代码上下文是否完整
-3. 使用交互式测试调试
+1. Try a larger model (`llama3.1:8b`)
+2. Check that the code context is complete
+3. Debug with the interactive test
 
-## 更新日志
+## Changelog
 
 ### v1.0.0 (2026-01)
 
-- 初始版本
-- 支持 Ollama/OpenAI/Mock 后端
-- 快速规则过滤器
-- Few-shot + Chain of Thought 提示
-- 结果缓存
+- Initial release
+- Ollama/OpenAI/Mock backends
+- Fast rule filter
+- Few-shot + Chain of Thought prompts
+- Result caching

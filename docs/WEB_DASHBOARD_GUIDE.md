@@ -2,7 +2,7 @@
 
 The page at `http://127.0.0.1:5000` is the findings list. It shows a fingerprint, a platform, a masked preview, a location, and a disposition. It does not show a key table, a balance, or a high-value count, and there is no export button on the page.
 
-The header switches **EN / 中文**. English is the default unless the browser language is Chinese or the URL has `?lang=en` or `?lang=zh`.
+The header switches **EN / Chinese**. English is the default unless the browser language is Chinese or the URL has `?lang=en` or `?lang=zh`.
 
 ## Start it
 
