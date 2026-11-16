@@ -100,6 +100,14 @@ def test_run_local_scan_uses_optimized_validator():
     assert "AsyncDatabase" in source
 
 
+def test_worker_source_has_no_second_engine():
+    from validator_optimized import optimized_validator_worker
+
+    source = inspect.getsource(optimized_validator_worker)
+    assert "validate_key_async" not in source
+    assert "validate_result(" in source
+
+
 def test_take_queued_result_from_sync_queue():
     from validator_optimized import take_queued_result
 
@@ -189,7 +197,7 @@ def test_connection_error_persists_as_unknown(monkeypatch):
         pending.put(ScanResult(
             platform="openai",
             api_key=KEY,
-            base_url="https://relay.example.invalid/v1",
+            base_url="https://93.184.216.34/v1",
             source_url="https://example.test/settings.py",
         ))
         deadline = time.time() + 8
@@ -206,7 +214,7 @@ def test_connection_error_persists_as_unknown(monkeypatch):
         asyncio.run(async_db.close())
         assert len(rows) == 1
         assert rows[0].status == KeyStatus.UNKNOWN.value
-        assert rows[0].checked_host == "relay.example.invalid"
+        assert rows[0].checked_host == "93.184.216.34"
         assert rows[0].run_id == "run-test"
 
 

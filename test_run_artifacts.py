@@ -70,6 +70,7 @@ def test_write_scan_artifacts_live_exit_and_no_secret():
         assert set(finding) == set(_FINDING_FIELDS)
         assert finding["status"] == "live"
         assert finding["checked_host"] == "relay.example.invalid"
+        assert finding["verification_kind"] == "protocol"
         assert finding["run_id"] == run_id
         markdown = (run_dir / "report.md").read_text(encoding="utf-8")
         assert SECRET not in markdown

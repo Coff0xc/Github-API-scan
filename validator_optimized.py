@@ -111,16 +111,12 @@ class OptimizedAsyncValidator:
             self._cache_manager = await get_cache_manager(self._cache_config)
             logger.info("缓存管理器已初始化")
 
-    async def _get_session(self, url: str) -> aiohttp.ClientSession:
-        """
-        获取 session（使用连接池）
-
-        优化：为不同域名维护独立的 session，提高连接复用率
-        """
+    async def _get_session(self, url: str = "") -> aiohttp.ClientSession:
+        """获取 session（使用连接池）。平台方法可无参调用。"""
         if self._connection_pool is None:
             self._connection_pool = await get_connection_pool()
 
-        session = await self._connection_pool.get_session(url)
+        session = await self._connection_pool.get_session(url or "https://api.openai.com")
         self._stats['connection_reused'] += 1
         return session
 
@@ -384,6 +380,36 @@ class OptimizedAsyncValidator:
             await self._cache_manager.record_domain_failure(base_url)
         return ValidationResult(KeyStatus.CONNECTION_ERROR, "连接失败")
 
+    async def validate_result(self, result) -> ValidationResult:
+        """Single dispatch: protocol / generic HTTP / match-only. No second write path."""
+        from validator.kinds import (
+            KIND_MATCH_ONLY,
+            OPENAI_COMPAT_PLATFORMS,
+            verification_kind,
+        )
+        from validator.platforms import PLATFORM_METHODS
+
+        platform = (getattr(result, "platform", None) or "openai").lower()
+        if getattr(result, "is_azure", False):
+            platform = "azure"
+        base_url = getattr(result, "base_url", "") or ""
+        kind = verification_kind(platform)
+
+        if base_url and not self._is_likely_valid_relay(base_url):
+            return ValidationResult(KeyStatus.INVALID, "base_url 无效")
+        if kind == KIND_MATCH_ONLY:
+            return ValidationResult(KeyStatus.UNKNOWN, "仅匹配，无协议验证")
+        if platform in OPENAI_COMPAT_PLATFORMS:
+            return await self.validate_openai(result.api_key, base_url)
+        method_name = f"validate_{platform}"
+        method = getattr(self, method_name, None)
+        if method is None:
+            method = PLATFORM_METHODS.get(method_name)
+            if method is None:
+                return ValidationResult(KeyStatus.UNKNOWN, "仅匹配，无协议验证")
+            return await method(self, result.api_key, base_url)
+        return await method(result.api_key, base_url)
+
     def get_stats(self) -> dict:
         """获取性能统计"""
         stats = self._stats.copy()
@@ -418,6 +444,13 @@ class OptimizedAsyncValidator:
                 stats['cache_hit_rate'] = 0.0
 
         return stats
+
+
+from validator.platforms import PLATFORM_METHODS as _PLATFORM_METHODS
+
+for _name, _fn in _PLATFORM_METHODS.items():
+    if _name != "validate_openai" and not hasattr(OptimizedAsyncValidator, _name):
+        setattr(OptimizedAsyncValidator, _name, _fn)
 
 
 # ============================================================================
@@ -464,16 +497,14 @@ async def optimized_validator_worker(
     """
     v2.2 优化版验证工作协程
 
-    - OpenAI / 中转站 Key 走缓存 + 域名健康度 + 智能重试路径
-    - 其余平台走 validate_key_async 通用分发
+    - 一条分发：validate_result（claim → validate → upsert）
     - 入库使用完整 LeakedKey（ScanResult 入队后补 status / model_tier / rpm）
     """
-    from validator import validate_key_async, CircuitBreaker
+    from validator.kinds import verification_kind
 
     db = await async_db.connect()
     validator = OptimizedAsyncValidator(db, dashboard, cache_config)
     await validator.init_cache()
-    circuit_breaker = CircuitBreaker()
     processed_count = 0
 
     logger.info(f"[Validator-{worker_id}] v2.2 优化版验证器启动")
@@ -498,30 +529,20 @@ async def optimized_validator_worker(
                     _safe_dashboard(dashboard, "increment_stat", "skipped_duplicate")
                     continue
 
-                if platform in ("openai", "relay"):
-                    vr = await validator.validate_openai(result.api_key, result.base_url or "")
-                    status = vr.status
-                    model_tier = vr.model_tier
-                    rpm = vr.rpm
-                else:
-                    status, model_tier, rpm = await validate_key_async(
-                        result.platform,
-                        result.api_key,
-                        result.base_url,
-                        circuit_breaker=circuit_breaker
-                    )
-
-                status_value = persist_status(status)
+                vr = await validator.validate_result(result)
+                status_value = persist_status(vr.status)
+                kind = verification_kind(platform)
                 await db.upsert_finding(LeakedKey(
                     platform=result.platform,
                     api_key=result.api_key,
                     base_url=result.base_url or "",
                     source_url=getattr(result, "source_url", "") or "",
                     status=status_value,
-                    model_tier=model_tier or "",
-                    rpm=rpm or 0,
+                    model_tier=vr.model_tier or "",
+                    rpm=vr.rpm or 0,
                     run_id=db.run_id,
                     checked_host=checked_host_from_url(result.base_url or ""),
+                    verification_kind=kind,
                 ))
                 processed_count += 1
 
@@ -547,7 +568,7 @@ async def optimized_validator_worker(
                                     masked_key=masked,
                                     source=source_short)
                     _safe_dashboard(dashboard, "add_log",
-                                    f"✓ 有效! {model_tier or platform.upper()} {masked}",
+                                    f"✓ 有效! {vr.model_tier or platform.upper()} {masked}",
                                     "VALID")
                 elif stored == KeyStatus.QUOTA_EXCEEDED:
                     _safe_dashboard(dashboard, "increment_stat", "quota_exceeded")
@@ -571,6 +592,7 @@ async def optimized_validator_worker(
                         status=KeyStatus.UNKNOWN.value,
                         run_id=db.run_id,
                         checked_host=checked_host_from_url(getattr(result, "base_url", "") or ""),
+                        verification_kind=verification_kind(getattr(result, "platform", "") or ""),
                     ))
                 except Exception:
                     try:

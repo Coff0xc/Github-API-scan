@@ -86,17 +86,18 @@ def render_run_markdown(document: dict, run_id: str = "") -> str:
         f"- findings: {len(findings)}",
         f"- live or quota: {live}",
         "",
-        "| Platform | Status | Preview | Checked host | Location |",
-        "|---|---|---|---|---|",
+        "| Platform | Status | Kind | Preview | Checked host | Location |",
+        "|---|---|---|---|---|---|",
     ]
     if not findings:
-        lines.append("| — | — | — | — | — |")
+        lines.append("| — | — | — | — | — | — |")
     else:
         for item in findings:
             lines.append(
-                "| {platform} | {status} | `{preview}` | {host} | {location} |".format(
+                "| {platform} | {status} | {kind} | `{preview}` | {host} | {location} |".format(
                     platform=_cell(item.get("platform")),
                     status=_cell(item.get("status")),
+                    kind=_cell(item.get("verification_kind")),
                     preview=_cell(item.get("preview")),
                     host=_cell(item.get("checked_host")),
                     location=_cell(item.get("location")),

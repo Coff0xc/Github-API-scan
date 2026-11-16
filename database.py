@@ -60,6 +60,7 @@ class LeakedKey:
     id: int = None
     run_id: str = ""
     checked_host: str = ""
+    verification_kind: str = ""
 
     def __post_init__(self):
         if self.found_time is None:
@@ -204,6 +205,7 @@ class Database:
                 for column, ddl in (
                     ("run_id", "ALTER TABLE leaked_keys ADD COLUMN run_id TEXT DEFAULT ''"),
                     ("checked_host", "ALTER TABLE leaked_keys ADD COLUMN checked_host TEXT DEFAULT ''"),
+                    ("verification_kind", "ALTER TABLE leaked_keys ADD COLUMN verification_kind TEXT DEFAULT ''"),
                 ):
                     try:
                         cursor.execute(ddl)
@@ -356,8 +358,8 @@ class Database:
                 try:
                     cursor.execute("""
                         INSERT INTO leaked_keys
-                        (platform, api_key, key_hash, base_url, status, source_url, model_tier, rpm, found_time, run_id, checked_host)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        (platform, api_key, key_hash, base_url, status, source_url, model_tier, rpm, found_time, run_id, checked_host, verification_kind)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
                         key.platform,
                         vault.encrypt(key.api_key),
@@ -370,6 +372,7 @@ class Database:
                         key.found_time.isoformat() if key.found_time else datetime.now().isoformat(),
                         key.run_id or "",
                         key.checked_host or "",
+                        key.verification_kind or "",
                     ))
                     conn.commit()
                     return True
@@ -481,7 +484,7 @@ class Database:
                 cursor = conn.cursor()
                 sql = """
                     SELECT platform, key_hash, api_key, source_url, found_time, disposition,
-                           status, base_url, run_id, checked_host
+                           status, base_url, run_id, checked_host, verification_kind
                     FROM leaked_keys
                 """
                 params = []
@@ -510,6 +513,7 @@ class Database:
                         "base_url": row["base_url"] or "",
                         "run_id": row["run_id"] or "",
                         "checked_host": row["checked_host"] or "",
+                        "verification_kind": row["verification_kind"] or "",
                     })
                 return rows
 
@@ -585,6 +589,7 @@ class Database:
             found_time=datetime.fromisoformat(row_dict["found_time"]) if row_dict.get("found_time") else None,
             run_id=row_dict.get("run_id") or "",
             checked_host=row_dict.get("checked_host") or "",
+            verification_kind=row_dict.get("verification_kind") or "",
         )
 
     # ========================================================================

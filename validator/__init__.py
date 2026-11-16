@@ -10,6 +10,7 @@ ValidationResult，以及各平台的 validate_key_async。不要新增第三套
 from database import KeyStatus
 from utils import mask_key
 from validator.circuit import CircuitBreaker, CircuitState, circuit_breaker
+from validator.kinds import verification_kind
 from validator.engine import (
     AsyncValidator,
     get_scan_result_class,
@@ -29,6 +30,7 @@ __all__ = [
     'AsyncValidator',
     'start_validators',
     'validate_key_async',
+    'verification_kind',
     'ValidationResult',
     'CircuitBreaker',
     'circuit_breaker',

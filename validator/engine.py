@@ -98,26 +98,34 @@ class AsyncValidator:
         return relay_url_is_allowed(base_url)
 
     async def validate_single(self, result: 'ScanResult') -> ValidationResult:
-        """验证单个结果（统一入口）"""
-        platform = result.platform.lower()
+        """验证单个结果（统一入口）。未知平台不再假装走 OpenAI 协议。"""
+        from validator.kinds import KIND_MATCH_ONLY, KIND_PROTOCOL, verification_kind
+
+        platform = (result.platform or "openai").lower()
+        kind = verification_kind(platform)
 
         if result.base_url and not self._is_likely_valid_relay(result.base_url):
             return ValidationResult(KeyStatus.INVALID, "base_url 无效")
+        if kind == KIND_MATCH_ONLY:
+            return ValidationResult(KeyStatus.UNKNOWN, "仅匹配，无协议验证")
 
         if platform == "azure" or result.is_azure:
             return await self.validate_azure(result.api_key, result.base_url)
 
         method_name = f"validate_{platform}"
         if method_name not in PLATFORM_METHODS:
-            return await self.validate_openai(result.api_key, result.base_url)
+            if kind == KIND_PROTOCOL:
+                return await self.validate_openai(result.api_key, result.base_url)
+            return ValidationResult(KeyStatus.UNKNOWN, "仅匹配，无协议验证")
         return await getattr(self, method_name)(result.api_key, result.base_url)
 
     async def process_result(self, result: 'ScanResult'):
         """
-        异步处理单个结果。
-
-        入库前按密钥去重。验证结果只回写状态、模型档位和 RPM。
+        遗留辅助：一次写入最终状态。扫描进程走 validator_optimized。
         """
+        from run_artifacts import checked_host_from_url, persist_status
+        from validator.kinds import verification_kind
+
         async with self.semaphore:
             masked = mask_key(result.api_key)
 
@@ -127,33 +135,30 @@ class AsyncValidator:
                     self.dashboard.increment_stat("skipped_duplicate")
                 return
 
+            self._log(f"验证 {masked}...", "INFO")
+            vr = await self.validate_single(result)
             leaked_key = LeakedKey(
                 platform=result.platform,
                 api_key=result.api_key,
                 base_url=result.base_url,
-                status=KeyStatus.PENDING.value,
+                status=persist_status(vr.status),
                 source_url=result.source_url,
-                found_time=datetime.now()
+                found_time=datetime.now(),
+                model_tier=vr.model_tier or "",
+                rpm=vr.rpm or 0,
+                checked_host=checked_host_from_url(result.base_url or ""),
+                verification_kind=verification_kind(result.platform),
             )
 
             if not self.db.insert_key(leaked_key):
                 self._log(f"[SKIP] Key 插入冲突: {masked}", "SKIP")
                 return
 
-            self._log(f"验证 {masked}...", "INFO")
-            vr = await self.validate_single(result)
-
-            self.db.update_key_status(
-                result.api_key,
-                vr.status,
-                model_tier=vr.model_tier,
-                rpm=vr.rpm,
-            )
-
+            stored = persist_status(vr.status)
             if self.dashboard:
                 source_short = result.source_url.split('/')[-1] if '/' in result.source_url else result.source_url
 
-                if vr.status == KeyStatus.VALID:
+                if stored == KeyStatus.VALID.value:
                     self.dashboard.add_valid_key(
                         platform=result.platform,
                         masked_key=masked,
@@ -162,7 +167,7 @@ class AsyncValidator:
                     )
                     self._log(f"✓ 有效! {vr.model_tier or result.platform.upper()} {masked}", "VALID")
 
-                elif vr.status == KeyStatus.QUOTA_EXCEEDED:
+                elif stored == KeyStatus.QUOTA_EXCEEDED.value:
                     self.dashboard.add_valid_key(
                         platform=result.platform,
                         masked_key=masked,
@@ -172,9 +177,9 @@ class AsyncValidator:
                     self.dashboard.increment_stat("quota_exceeded")
                     self._log(f"⚠ 配额耗尽 {masked}", "WARN")
 
-                elif vr.status == KeyStatus.CONNECTION_ERROR:
+                elif stored == KeyStatus.UNKNOWN.value:
                     self.dashboard.increment_stat("connection_errors")
-                    self._log(f"✗ 连接失败 {masked}", "ERROR")
+                    self._log(f"✗ 未确认 {masked}", "ERROR")
 
                 else:
                     self.dashboard.increment_stat("invalid_keys")
@@ -196,9 +201,8 @@ async def validate_key_async(
     """
     按平台分发验证，返回 (status, model_tier, rpm)。
 
-    validator_optimized 的验证 worker 对非 openai/relay 平台调用本函数；
-    openai/relay 走 OptimizedAsyncValidator 的缓存路径，不经这里。
-    每次调用使用独立的临时验证器，session 用毕即关，不做跨调用缓存。
+    平台分发原语。扫描 worker 走 OptimizedAsyncValidator.validate_result，
+    不再调用本函数。每次调用使用独立的临时验证器。
     """
     from scanner import ScanResult
 

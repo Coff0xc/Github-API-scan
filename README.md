@@ -259,7 +259,7 @@ aikeyscan --authorized --target-repo owner/name
 aikeyscan --authorized --scan-local D:\repos\target
 ```
 
-Each of those writes `findings.json` in the working directory and a run directory under `.aikeyscan/runs/<id>/` (`findings.json`, `report.md`). `--format sarif` adds `results.sarif`. `--live-only` keeps live and quota rows. Exit code 2 means a live key was found; 1 is a config or authorization stop; 0 is a clean scan. Another path: `--findings-json reports/findings.json`. If you pass only that flag and no target, it exports the database you already have and exits.
+Each of those writes `findings.json` in the working directory and a run directory under `.aikeyscan/runs/<id>/` (`findings.json`, `report.md`). `--format sarif` adds `results.sarif`. `--live-only` keeps live and quota rows. `verification_kind` is `protocol` (OpenAI-compatible / Anthropic / Gemini / Azure), `generic_http`, or `match_only`. Exit code 2 means a live key was found; 1 is a config or authorization stop; 0 is a clean scan. Another path: `--findings-json reports/findings.json`. If you pass only that flag and no target, it exports the database you already have and exits.
 
 While the scan runs, the terminal title is **AI API Key Scanner**. The table under the counters is **发现记录**: service, shortened preview, status, and place. It is the same idea as the screenshot, in the terminal. There is no balance column.
 

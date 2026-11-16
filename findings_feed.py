@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 
 from database import Database
 from run_artifacts import checked_host_from_url, public_status
+from validator.kinds import verification_kind as kind_for
 
 SCHEMA = "findings.v1"
 DISPOSITIONS = ("open", "notified", "rotated", "false_positive")
@@ -31,6 +32,7 @@ _FINDING_FIELDS = (
     "run_id",
     "checked_host",
     "status",
+    "verification_kind",
 )
 
 
@@ -75,6 +77,8 @@ def _finding_from_row(row: dict) -> dict:
         "run_id": row.get("run_id") or "",
         "checked_host": host,
         "status": public_status(row.get("status") or ""),
+        "verification_kind": (row.get("verification_kind") or "").strip()
+            or kind_for(row.get("platform") or ""),
     }
 
 

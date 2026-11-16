@@ -119,6 +119,7 @@ class AsyncDatabase:
         for ddl in (
             "ALTER TABLE leaked_keys ADD COLUMN run_id TEXT DEFAULT ''",
             "ALTER TABLE leaked_keys ADD COLUMN checked_host TEXT DEFAULT ''",
+            "ALTER TABLE leaked_keys ADD COLUMN verification_kind TEXT DEFAULT ''",
         ):
             try:
                 await db.execute(ddl)
@@ -181,6 +182,7 @@ class AsyncDatabase:
             key.found_time.isoformat() if key.found_time else datetime.now().isoformat(),
             key.run_id or self.run_id or "",
             key.checked_host or "",
+            key.verification_kind or "",
         )
 
     async def _flush_queue(self):
@@ -202,8 +204,8 @@ class AsyncDatabase:
                     await self._conn.execute(
                         """
                         INSERT OR IGNORE INTO leaked_keys
-                        (platform, api_key, key_hash, base_url, status, source_url, model_tier, rpm, found_time, run_id, checked_host)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        (platform, api_key, key_hash, base_url, status, source_url, model_tier, rpm, found_time, run_id, checked_host, verification_kind)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         self._row_values(key),
                     )
@@ -266,8 +268,8 @@ class AsyncDatabase:
             await self._conn.execute(
                 """
                 INSERT INTO leaked_keys
-                (platform, api_key, key_hash, base_url, status, source_url, model_tier, rpm, found_time, run_id, checked_host, verified_time)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (platform, api_key, key_hash, base_url, status, source_url, model_tier, rpm, found_time, run_id, checked_host, verification_kind, verified_time)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(key_hash) DO UPDATE SET
                     status=excluded.status,
                     model_tier=excluded.model_tier,
@@ -276,7 +278,8 @@ class AsyncDatabase:
                     base_url=excluded.base_url,
                     source_url=excluded.source_url,
                     run_id=excluded.run_id,
-                    checked_host=excluded.checked_host
+                    checked_host=excluded.checked_host,
+                    verification_kind=excluded.verification_kind
                 """,
                 values + (verified_time,),
             )

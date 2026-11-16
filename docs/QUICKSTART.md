@@ -38,7 +38,7 @@ aikeyscan --authorized --target-repo owner/name
 aikeyscan --authorized --scan-local D:\repos\target
 ```
 
-`--target-repo` is `owner/name`. Without one of those two flags, GitHub search does not start. When the scan finishes it writes `findings.json` and `.aikeyscan/runs/<id>/` (findings + markdown). Each row has fingerprint, platform, preview, checked host, location, disposition, and live/dead/quota/unknown. Exit 2 means a live key. No full key.
+`--target-repo` is `owner/name`. Without one of those two flags, GitHub search does not start. When the scan finishes it writes `findings.json` and `.aikeyscan/runs/<id>/` (findings + markdown). Each row has fingerprint, platform, preview, checked host, verification kind (`protocol` / `generic_http` / `match_only`), location, disposition, and live/dead/quota/unknown. Exit 2 means a live key. No full key.
 
 Open the same rows in a browser:
 

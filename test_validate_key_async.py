@@ -51,8 +51,8 @@ async def test_azure_flag_set_for_azure_platform(monkeypatch):
     assert calls == [""]
 
 
-async def test_unknown_platform_falls_back_to_openai(monkeypatch):
-    """未知平台回落 OpenAI 兼容验证。"""
+async def test_unknown_platform_is_match_only(monkeypatch):
+    """没有协议的平台不假装走 OpenAI。"""
     calls = []
 
     async def fake_openai(self, api_key, base_url):
@@ -63,8 +63,8 @@ async def test_unknown_platform_falls_back_to_openai(monkeypatch):
 
     status, *_ = await validate_key_async("future_platform", "sk-x", PUBLIC_URL)
 
-    assert calls == [PUBLIC_URL]
-    assert status == KeyStatus.INVALID
+    assert calls == []
+    assert status == KeyStatus.UNKNOWN
 
 
 async def test_ssrf_guard_blocks_private_url_before_dispatch(monkeypatch):
@@ -99,7 +99,7 @@ async def test_accepts_caller_circuit_breaker(monkeypatch):
     monkeypatch.setattr(AsyncValidator, "validate_openai", fake_openai)
 
     status, *_ = await validate_key_async(
-        "other", "sk-y", PUBLIC_URL, circuit_breaker=breaker
+        "openai", "sk-y", PUBLIC_URL, circuit_breaker=breaker
     )
     assert status == KeyStatus.INVALID
 
@@ -145,3 +145,13 @@ def test_all_platform_methods_bound_on_async_validator():
     for name in PLATFORM_VALIDATE_METHODS:
         assert hasattr(validator, name), name
         assert callable(getattr(validator, name))
+
+
+def test_optimized_validator_binds_non_openai_methods():
+    from database import Database
+    from validator_optimized import OptimizedAsyncValidator
+
+    validator = OptimizedAsyncValidator(Database(":memory:"))
+    assert callable(getattr(validator, "validate_gemini"))
+    assert callable(getattr(validator, "validate_anthropic"))
+    assert callable(getattr(validator, "validate_result"))
