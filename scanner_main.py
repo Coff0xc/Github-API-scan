@@ -18,6 +18,7 @@ v2.1 优化（保留）：
 - 配置验证 - 启动时检查
 """
 
+import os
 import sys
 import signal
 import asyncio
@@ -25,6 +26,7 @@ import queue
 import threading
 import time
 import argparse
+from pathlib import Path
 from typing import Optional
 
 from config import config
@@ -47,6 +49,7 @@ from cache_manager import get_cache_manager, close_cache_manager, CacheConfig
 from export_io import decrypt_keys, export_keys, export_keys_csv, export_keys_encrypted
 from findings_feed import apply_dispositions, set_one_disposition, write_findings
 from run_artifacts import EXIT_CONFIG, write_scan_artifacts
+from utils import install_log_redact, set_redact
 from use_boundary import (
     check_authorization,
     public_sources_allowed,
@@ -430,6 +433,7 @@ def _emit_scan_artifacts(args, run_id: str) -> int:
         live_only=bool(args.live_only),
         fmt=args.format or "json",
         report_path=args.report or "",
+        baseline_path=getattr(args, "baseline", "") or "",
     )
     print(summary)
     return code
@@ -509,8 +513,18 @@ v2.1 优化（保留）:
                         help='只写出存活配对（live 与 quota）')
     parser.add_argument('--format', default='json', metavar='FMT',
                         help='产物格式：json（findings+md，默认）、sarif、all')
+    parser.add_argument('--baseline', metavar='FILE',
+                        help='已知指纹清单（findings.json 或指纹数组）；退出码只计新指纹')
+    parser.add_argument('--since-ref', metavar='REF',
+                        help='本地扫描只读该引用之后的提交（PR 用 base SHA）')
+    parser.add_argument('--no-redact', action='store_true',
+                        help='日志关闭密钥形态脱敏（默认开启）')
+    parser.add_argument('--quiet', action='store_true',
+                        help='关闭 TUI（GITHUB_ACTIONS 下自动开启）')
 
     args = parser.parse_args()
+    set_redact(not args.no_redact)
+    install_log_redact()
 
     # 使用边界确认（--authorized 或环境变量 SCANNER_AUTHORIZED=1 可跳过交互）
     if not check_authorization(getattr(args, "authorized", False)):
@@ -525,9 +539,20 @@ v2.1 优化（保留）:
     if args.scan_local:
         if not storage_encryption_ready(args.allow_plaintext_db):
             return EXIT_CONFIG
+        if args.baseline and not Path(args.baseline).is_file():
+            print("[ABORT] baseline 文件不存在。")
+            return EXIT_CONFIG
         from local_scanner import run_local_scan
-        stats = run_local_scan(args.scan_local, config.db_path,
-                       scan_git_history=not args.no_git_history)
+        quiet = bool(args.quiet) or os.environ.get("GITHUB_ACTIONS") == "true"
+        stats = run_local_scan(
+            args.scan_local, config.db_path,
+            scan_git_history=not args.no_git_history,
+            since_ref=args.since_ref or "",
+            quiet=quiet,
+        )
+        if isinstance(stats, dict) and stats.get("error") == "since-ref":
+            print("[ABORT] --since-ref 不是有效的 git 引用。")
+            return EXIT_CONFIG
         run_id = ""
         if isinstance(stats, dict):
             run_id = stats.get("run_id") or ""
@@ -590,6 +615,9 @@ v2.1 优化（保留）:
     if not require_remote_scope(args.target_org or "", args.target_repo or ""):
         return EXIT_CONFIG
     if not storage_encryption_ready(args.allow_plaintext_db):
+        return EXIT_CONFIG
+    if args.baseline and not Path(args.baseline).is_file():
+        print("[ABORT] baseline 文件不存在。")
         return EXIT_CONFIG
 
     scanner = OptimizedSecretScannerV22(

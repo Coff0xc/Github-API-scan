@@ -1,0 +1,80 @@
+name: aikeyscan
+description: Scan this repository for live AI API key pairs (key + relay host).
+author: Coff0xc
+branding:
+  icon: shield
+  color: blue
+
+inputs:
+  scan-path:
+    description: Directory to scan (git repo or folder).
+    required: false
+    default: "."
+  since-ref:
+    description: Only scan commits after this ref. On pull_request, pass the base SHA.
+    required: false
+    default: ""
+  baseline:
+    description: Path to a findings.json (or fingerprint list). Exit code ignores those fingerprints.
+    required: false
+    default: ""
+  format:
+    description: Artifact format (json, sarif, all).
+    required: false
+    default: sarif
+  live-only:
+    description: Only emit live and quota findings.
+    required: false
+    default: "true"
+  python-version:
+    description: Python version used to install aikeyscan.
+    required: false
+    default: "3.12"
+  upload-sarif:
+    description: Upload aikeyscan.sarif to GitHub code scanning.
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+    - name: Install aikeyscan
+      shell: bash
+      run: pip install "${{ github.action_path }}"
+    - name: Scan
+      id: scan
+      shell: bash
+      continue-on-error: true
+      env:
+        SCANNER_AUTHORIZED: "1"
+      run: |
+        set -euo pipefail
+        extra=()
+        if [ -n "${{ inputs.since-ref }}" ]; then
+          extra+=(--since-ref "${{ inputs.since-ref }}")
+        fi
+        if [ -n "${{ inputs.baseline }}" ]; then
+          extra+=(--baseline "${{ inputs.baseline }}")
+        fi
+        live=()
+        if [ "${{ inputs.live-only }}" = "true" ]; then
+          live+=(--live-only)
+        fi
+        aikeyscan --authorized --allow-plaintext-db --quiet \
+          --scan-local "${{ inputs.scan-path }}" \
+          --format "${{ inputs.format }}" \
+          "${live[@]}" "${extra[@]}"
+    - name: Upload SARIF
+      if: ${{ always() && inputs.upload-sarif == 'true' && hashFiles('aikeyscan.sarif') != '' }}
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: aikeyscan.sarif
+        wait-for-processing: false
+    - name: Fail on live keys or scan error
+      if: steps.scan.outcome == 'failure'
+      shell: bash
+      run: exit 1

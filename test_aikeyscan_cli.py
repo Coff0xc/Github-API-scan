@@ -34,6 +34,8 @@ def _assert_help(result):
     assert "findings-json" in combined
     assert "target-org" in combined
     assert "live-only" in combined
+    assert "baseline" in combined
+    assert "since-ref" in combined
 
 
 def test_script_help_still_works():

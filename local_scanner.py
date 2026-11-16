@@ -46,12 +46,14 @@ class LocalScanner:
         dashboard=None,
         scan_git_history: bool = True,
         db: Optional[Database] = None,
+        since_ref: str = "",
     ):
         self.root = os.path.abspath(root)
         self.result_queue = result_queue
         self.stop_event = stop_event
         self.dashboard = dashboard
         self.scan_git_history = scan_git_history
+        self.since_ref = (since_ref or "").strip()
         self.db = db if db is not None else Database(config.db_path)
 
         self._patterns = COMPILED_KEY_PATTERNS
@@ -76,8 +78,14 @@ class LocalScanner:
             return
 
         is_git = self._is_git_repo()
+        if self.since_ref:
+            if not is_git or not self._ref_exists(self.since_ref):
+                self._log(f"since-ref 不存在: {self.since_ref}", "ERROR")
+                self.stats["error"] = "since-ref"
+                return
+        range_note = f", since {self.since_ref}" if self.since_ref else ""
         self._log(f"本地扫描开始: {self.root} "
-                  f"({'git 仓库: 当前文件 + ' + ('全量历史' if self.scan_git_history else '不含历史') if is_git else '普通目录'})",
+                  f"({'git 仓库: 当前文件 + ' + ('全量历史' if self.scan_git_history else '不含历史') if is_git else '普通目录'}{range_note})",
                   "SCAN")
 
         if is_git and self.scan_git_history:
@@ -99,6 +107,7 @@ class LocalScanner:
     def _scan_worktree(self):
         skip_dirs = {'.git', 'node_modules', '__pycache__', '.venv', 'venv', 'dist', 'build'}
         tracked = self._tracked_blob_shas()
+        changed = self._changed_paths() if self.since_ref else None
         for dirpath, dirnames, filenames in os.walk(self.root):
             if self.stop_event.is_set():
                 return
@@ -108,6 +117,8 @@ class LocalScanner:
                     return
                 path = os.path.join(dirpath, fn)
                 rel = os.path.relpath(path, self.root).replace(os.sep, '/')
+                if changed is not None and rel not in changed:
+                    continue
                 blob_sha = tracked.get(rel)
                 if blob_sha and blob_sha in self._seen_blobs:
                     self.stats["skipped"] += 1
@@ -151,10 +162,33 @@ class LocalScanner:
         self._flush_blobs()
         self._scan_commit_messages()
 
-    def _list_blobs(self):
+    def _ref_exists(self, ref: str) -> bool:
+        try:
+            subprocess.run(
+                ["git", "-C", self.root, "rev-parse", "--verify", ref],
+                capture_output=True, timeout=10, check=True,
+            )
+            return True
+        except (subprocess.SubprocessError, FileNotFoundError):
+            return False
+
+    def _changed_paths(self) -> Set[str]:
         try:
             proc = subprocess.run(
-                ["git", "-C", self.root, "rev-list", "--all", "--objects"],
+                ["git", "-C", self.root, "diff", "--name-only", "--diff-filter=ACMR",
+                 f"{self.since_ref}...HEAD"],
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                timeout=60, check=True,
+            )
+        except (subprocess.SubprocessError, FileNotFoundError):
+            return set()
+        return {line.strip().replace("\\", "/") for line in proc.stdout.splitlines() if line.strip()}
+
+    def _list_blobs(self):
+        objects_arg = f"{self.since_ref}..HEAD" if self.since_ref else "--all"
+        try:
+            proc = subprocess.run(
+                ["git", "-C", self.root, "rev-list", objects_arg, "--objects"],
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -185,8 +219,9 @@ class LocalScanner:
 
     def _commit_count(self) -> int:
         try:
+            rev_arg = f"{self.since_ref}..HEAD" if self.since_ref else "--all"
             proc = subprocess.run(
-                ["git", "-C", self.root, "rev-list", "--all", "--count"],
+                ["git", "-C", self.root, "rev-list", rev_arg, "--count"],
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -251,8 +286,9 @@ class LocalScanner:
 
     def _scan_commit_messages(self):
         try:
+            log_arg = f"{self.since_ref}..HEAD" if self.since_ref else "--all"
             proc = subprocess.run(
-                ["git", "-C", self.root, "log", "--all", "--pretty=format:%x1e%H%n%B"],
+                ["git", "-C", self.root, "log", log_arg, "--pretty=format:%x1e%H%n%B"],
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -345,10 +381,12 @@ def start_local_scanner(
     dashboard=None,
     scan_git_history: bool = True,
     db: Optional[Database] = None,
+    since_ref: str = "",
 ) -> threading.Thread:
     """启动本地扫描线程"""
     scanner = LocalScanner(
         root, result_queue, stop_event, dashboard, scan_git_history, db=db,
+        since_ref=since_ref,
     )
     thread = threading.Thread(target=scanner.run, name="LocalScanner", daemon=True)
     thread.start()
@@ -360,6 +398,8 @@ def run_local_scan(
     db_path: str = "",
     scan_git_history: bool = True,
     num_validators: int = 1,
+    since_ref: str = "",
+    quiet: bool = False,
 ):
     """
     本地扫描完整流程（含 TUI 与验证管线），供 main 入口直接调用。
@@ -386,9 +426,9 @@ def run_local_scan(
 
     result_queue = queue.Queue(maxsize=10000)
     stop_event = threading.Event()
-    dashboard = Dashboard()
-
-    dashboard.update_stats(total_tokens=0, is_running=True)
+    dashboard = None if quiet else Dashboard()
+    if dashboard:
+        dashboard.update_stats(total_tokens=0, is_running=True)
 
     validator_threads = start_validators(
         result_queue,
@@ -400,29 +440,38 @@ def run_local_scan(
     )
     scanner_thread = start_local_scanner(
         root, result_queue, stop_event, dashboard=dashboard,
-        scan_git_history=scan_git_history, db=db,
+        scan_git_history=scan_git_history, db=db, since_ref=since_ref,
     )
 
+    def _pump():
+        while scanner_thread.is_alive():
+            if dashboard:
+                dashboard.update_stats(queue_size=result_queue.qsize())
+                dashboard.refresh()
+            _time.sleep(0.25)
+        deadline = _time.time() + 30
+        idle = 0
+        while _time.time() < deadline:
+            if dashboard:
+                dashboard.update_stats(queue_size=result_queue.qsize())
+                dashboard.refresh()
+            if result_queue.empty():
+                idle += 1
+                if idle >= 8:
+                    break
+            else:
+                idle = 0
+            _time.sleep(0.25)
+
     try:
-        with dashboard.start():
-            while scanner_thread.is_alive():
-                dashboard.update_stats(queue_size=result_queue.qsize())
-                dashboard.refresh()
-                _time.sleep(0.25)
-            deadline = _time.time() + 30
-            idle = 0
-            while _time.time() < deadline:
-                dashboard.update_stats(queue_size=result_queue.qsize())
-                dashboard.refresh()
-                if result_queue.empty():
-                    idle += 1
-                    if idle >= 8:
-                        break
-                else:
-                    idle = 0
-                _time.sleep(0.25)
+        if dashboard:
+            with dashboard.start():
+                _pump()
+        else:
+            _pump()
     except KeyboardInterrupt:
-        dashboard.add_log("收到中断信号，正在停止...", "WARN")
+        if dashboard:
+            dashboard.add_log("收到中断信号，正在停止...", "WARN")
     finally:
         stop_event.set()
         for thread in validator_threads:

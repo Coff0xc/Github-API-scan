@@ -18,6 +18,7 @@ config_local.py
 findings.json
 dispositions.json
 .aikeyscan/
+aikeyscan.sarif
 *.key
 *_keys.txt
 *_keys.csv

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Set
 from urllib.parse import urlparse
 
 from aikeyscan import __version__
@@ -63,6 +63,49 @@ def persist_status(status) -> str:
 
 def live_count(findings: list) -> int:
     return sum(1 for item in findings if item.get("status") in _LIVE_PUBLIC)
+
+
+def load_baseline_fingerprints(path: str) -> Set[str]:
+    """Read fingerprints from findings.json, {fingerprints: []}, a JSON array, or one hex per line."""
+    text = Path(path).read_text(encoding="utf-8")
+    found: Set[str] = set()
+
+    def _add(value) -> None:
+        fp = str(value or "").strip().lower()
+        if len(fp) == 64 and all(c in "0123456789abcdef" for c in fp):
+            found.add(fp)
+
+    stripped = text.strip()
+    if stripped.startswith("{") or stripped.startswith("["):
+        payload = json.loads(stripped)
+        if isinstance(payload, list):
+            for item in payload:
+                if isinstance(item, dict):
+                    _add(item.get("fingerprint"))
+                else:
+                    _add(item)
+            return found
+        if isinstance(payload, dict):
+            for item in payload.get("findings") or []:
+                if isinstance(item, dict):
+                    _add(item.get("fingerprint"))
+            for item in payload.get("fingerprints") or []:
+                _add(item)
+            return found
+    for line in text.splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            _add(line)
+    return found
+
+
+def without_baseline(findings: list, baseline: Set[str]) -> list:
+    if not baseline:
+        return list(findings)
+    return [
+        item for item in findings
+        if (item.get("fingerprint") or "").strip().lower() not in baseline
+    ]
 
 
 def exit_code_for_findings(findings: list) -> int:
@@ -173,15 +216,21 @@ def write_scan_artifacts(
     fmt: str = "json",
     report_path: str = "",
     runs_root: Optional[Path] = None,
+    baseline_path: str = "",
+    sarif_json: str = "aikeyscan.sarif",
 ) -> tuple[str, int]:
     """Write findings.json + report.md (and SARIF when requested). Return summary and exit code."""
     from findings_feed import build_document
 
+    baseline = load_baseline_fingerprints(baseline_path) if baseline_path else set()
     full = build_document(db_path, run_id=run_id or None, live_only=False)
     document = build_document(db_path, run_id=run_id or None, live_only=live_only) if live_only else full
+    document = dict(document)
     if run_id:
-        document = dict(document)
         document["run_id"] = run_id
+    document["findings"] = without_baseline(document.get("findings") or [], baseline)
+    if baseline_path:
+        document["baseline"] = baseline_path
 
     root = Path(runs_root) if runs_root else Path(".aikeyscan") / "runs"
     run_dir = root / (run_id or "adhoc")
@@ -208,13 +257,21 @@ def write_scan_artifacts(
     if "sarif" in formats:
         sarif_path = run_dir / "results.sarif"
         _write_json(sarif_path, build_sarif(document))
+        if runs_root is None:
+            cwd_sarif = Path(sarif_json)
+            if cwd_sarif.resolve() != sarif_path.resolve():
+                cwd_sarif.parent.mkdir(parents=True, exist_ok=True)
+                cwd_sarif.write_text(sarif_path.read_text(encoding="utf-8"), encoding="utf-8")
 
-    code = exit_code_for_findings(full.get("findings") or [])
+    new_full = without_baseline(full.get("findings") or [], baseline)
+    code = exit_code_for_findings(new_full)
     lines = [
         f"已写出 {len(document.get('findings') or [])} 条发现: {cwd_json}",
         f"  运行目录: {run_dir}",
         "  文件不含明文 Key。",
     ]
+    if baseline_path:
+        lines.append(f"  baseline: {len(baseline)} 个已知指纹，退出码只计新发现")
     if sarif_path:
         lines.append(f"  SARIF: {sarif_path}")
     return "\n".join(lines), code

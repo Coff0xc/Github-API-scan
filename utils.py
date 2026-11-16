@@ -10,6 +10,7 @@
 
 import ipaddress
 import math
+import re
 import socket
 from collections import Counter
 from functools import lru_cache
@@ -105,6 +106,39 @@ def mask_key(api_key: str) -> str:
     if len(api_key) <= 12:
         return api_key[:4] + "..." + api_key[-4:]
     return api_key[:8] + "..." + api_key[-4:]
+
+
+_REDACT = True
+_KEYISH = re.compile(
+    r"(sk-[A-Za-z0-9_-]{16,}|AIza[0-9A-Za-z_-]{20,}|xai-[A-Za-z0-9]{20,}"
+    r"|ghp_[A-Za-z0-9]{20,}|gsk_[A-Za-z0-9]{20,}|hf_[A-Za-z0-9]{20,}"
+    r"|sk-ant-[A-Za-z0-9_-]{16,}|sk-or-v1-[A-Za-z0-9]{16,})"
+)
+
+
+def set_redact(enabled: bool) -> None:
+    global _REDACT
+    _REDACT = bool(enabled)
+
+
+def redact_enabled() -> bool:
+    return _REDACT
+
+
+def redact_message(text: str) -> str:
+    if not text or not _REDACT:
+        return text
+    return _KEYISH.sub(lambda match: mask_key(match.group(0)), text)
+
+
+def install_log_redact() -> None:
+    """Strip key-shaped tokens from loguru messages. Default on."""
+    from loguru import logger
+
+    def _patch(record):
+        record["message"] = redact_message(record["message"])
+
+    logger.configure(patcher=_patch)
 
 
 def should_skip_file(file_path: str, file_size: int = 0) -> Tuple[bool, str]:

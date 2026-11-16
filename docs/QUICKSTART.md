@@ -38,7 +38,16 @@ aikeyscan --authorized --target-repo owner/name
 aikeyscan --authorized --scan-local D:\repos\target
 ```
 
-`--target-repo` is `owner/name`. Without one of those two flags, GitHub search does not start. When the scan finishes it writes `findings.json` and `.aikeyscan/runs/<id>/` (findings + markdown). Each row has fingerprint, platform, preview, checked host, verification kind (`protocol` / `generic_http` / `match_only`), location, disposition, and live/dead/quota/unknown. Exit 2 means a live key. No full key.
+`--target-repo` is `owner/name`. Without one of those two flags, GitHub search does not start. When the scan finishes it writes `findings.json` and `.aikeyscan/runs/<id>/` (findings + markdown). `--format sarif` also writes `aikeyscan.sarif`. `--baseline findings.json` ignores known fingerprints in the exit code. `--since-ref <sha>` limits a local git scan to new commits. Logs redact key shapes unless you pass `--no-redact`. Exit 2 means a live key. No full key.
+
+CI (after `actions/checkout` with `fetch-depth: 0`):
+
+```yaml
+- uses: Coff0xc/Github-API-scan@main
+  with:
+    since-ref: ${{ github.event.pull_request.base.sha }}
+    baseline: .aikeyscan-baseline.json
+```
 
 Open the same rows in a browser:
 
