@@ -11,9 +11,11 @@
    - scan_time: 扫描时间
 """
 
+import json
 import sqlite3
 import threading
-from datetime import datetime
+import uuid
+from datetime import datetime, timezone
 from typing import Optional, List, Set, Iterable
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -30,8 +32,9 @@ class KeyStatus(Enum):
     VALID = "valid"                  # 有效
     INVALID = "invalid"              # 无效（认证失败）
     QUOTA_EXCEEDED = "quota_exceeded"  # 有效但配额耗尽
-    CONNECTION_ERROR = "connection_error"  # 连接失败（中转站挂了）
+    CONNECTION_ERROR = "connection_error"  # 连接失败（中转站挂了）；产物里归为 unknown
     UNVERIFIED = "unverified"        # 无法验证（如 Azure 缺少完整 endpoint）
+    UNKNOWN = "unknown"              # 验证未完成：网络/超时/不确定
 
 
 @dataclass
@@ -55,6 +58,8 @@ class LeakedKey:
     rpm: int = 0            # Rate Per Minute
     found_time: datetime = None
     id: int = None
+    run_id: str = ""
+    checked_host: str = ""
 
     def __post_init__(self):
         if self.found_time is None:
@@ -195,6 +200,27 @@ class Database:
                         scan_time DATETIME DEFAULT CURRENT_TIMESTAMP
                     )
                 """)
+
+                for column, ddl in (
+                    ("run_id", "ALTER TABLE leaked_keys ADD COLUMN run_id TEXT DEFAULT ''"),
+                    ("checked_host", "ALTER TABLE leaked_keys ADD COLUMN checked_host TEXT DEFAULT ''"),
+                ):
+                    try:
+                        cursor.execute(ddl)
+                    except sqlite3.OperationalError:
+                        pass
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS scan_runs (
+                        id TEXT PRIMARY KEY,
+                        scope TEXT NOT NULL DEFAULT '',
+                        started_at TEXT NOT NULL,
+                        finished_at TEXT,
+                        stats TEXT DEFAULT ''
+                    )
+                """)
+                cursor.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_run_id ON leaked_keys(run_id)"
+                )
                 
                 conn.commit()
                 
@@ -330,8 +356,8 @@ class Database:
                 try:
                     cursor.execute("""
                         INSERT INTO leaked_keys
-                        (platform, api_key, key_hash, base_url, status, source_url, model_tier, rpm, found_time)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        (platform, api_key, key_hash, base_url, status, source_url, model_tier, rpm, found_time, run_id, checked_host)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
                         key.platform,
                         vault.encrypt(key.api_key),
@@ -342,6 +368,8 @@ class Database:
                         key.model_tier,
                         key.rpm,
                         key.found_time.isoformat() if key.found_time else datetime.now().isoformat(),
+                        key.run_id or "",
+                        key.checked_host or "",
                     ))
                     conn.commit()
                     return True
@@ -444,18 +472,24 @@ class Database:
                     "platforms": platforms
                 }
 
-    def list_finding_sources(self) -> List[dict]:
+    def list_finding_sources(self, run_id: str = "") -> List[dict]:
         """
         代理管道用的行。只返回指纹、脱敏预览和位置，不返回明文 Key。
         """
         with self._lock:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("""
-                    SELECT platform, key_hash, api_key, source_url, found_time, disposition
+                sql = """
+                    SELECT platform, key_hash, api_key, source_url, found_time, disposition,
+                           status, base_url, run_id, checked_host
                     FROM leaked_keys
-                    ORDER BY found_time DESC
-                """)
+                """
+                params = []
+                if run_id:
+                    sql += " WHERE run_id = ?"
+                    params.append(run_id)
+                sql += " ORDER BY found_time DESC"
+                cursor.execute(sql, params)
                 rows = []
                 for row in cursor.fetchall():
                     stored = row["api_key"] or ""
@@ -472,8 +506,50 @@ class Database:
                         "location": row["source_url"] or "",
                         "disposition": row["disposition"] or "open",
                         "found_time": row["found_time"] or "",
+                        "status": row["status"] or "",
+                        "base_url": row["base_url"] or "",
+                        "run_id": row["run_id"] or "",
+                        "checked_host": row["checked_host"] or "",
                     })
                 return rows
+
+    def create_run(self, scope: str) -> str:
+        """Start a scan run and return its id."""
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        run_id = f"{stamp}-{uuid.uuid4().hex[:6]}"
+        started = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        with self._lock:
+            with self._get_connection() as conn:
+                conn.execute(
+                    "INSERT INTO scan_runs (id, scope, started_at) VALUES (?, ?, ?)",
+                    (run_id, scope or "", started),
+                )
+                conn.commit()
+        return run_id
+
+    def finish_run(self, run_id: str, stats: Optional[dict] = None) -> None:
+        if not run_id:
+            return
+        finished = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        payload = json.dumps(stats or {}, ensure_ascii=False)
+        with self._lock:
+            with self._get_connection() as conn:
+                conn.execute(
+                    "UPDATE scan_runs SET finished_at = ?, stats = ? WHERE id = ?",
+                    (finished, payload, run_id),
+                )
+                conn.commit()
+
+    def attach_run(self, api_key: str, run_id: str) -> None:
+        if not api_key or not run_id:
+            return
+        with self._lock:
+            with self._get_connection() as conn:
+                conn.execute(
+                    "UPDATE leaked_keys SET run_id = ? WHERE key_hash = ?",
+                    (run_id, vault.hash_key(api_key)),
+                )
+                conn.commit()
 
     def set_disposition(self, fingerprint: str, disposition: str) -> bool:
         """按指纹更新处置状态。指纹必须是 64 位十六进制。"""
@@ -506,7 +582,9 @@ class Database:
             source_url=row_dict.get("source_url") or "",
             model_tier=row_dict.get("model_tier") or "",
             rpm=row_dict.get("rpm") or 0,
-            found_time=datetime.fromisoformat(row_dict["found_time"]) if row_dict.get("found_time") else None
+            found_time=datetime.fromisoformat(row_dict["found_time"]) if row_dict.get("found_time") else None,
+            run_id=row_dict.get("run_id") or "",
+            checked_host=row_dict.get("checked_host") or "",
         )
 
     # ========================================================================

@@ -32,8 +32,9 @@ def _shared_claims(db_path: str) -> Tuple[threading.Lock, Set[str]]:
 class AsyncDatabase:
     """异步数据库。连接绑在当前事件循环上，验证结果一次写入。"""
 
-    def __init__(self, db_path: str = "leaked_keys.db"):
+    def __init__(self, db_path: str = "leaked_keys.db", run_id: str = ""):
         self.db_path = db_path
+        self.run_id = run_id or ""
         self._conn: Optional[aiosqlite.Connection] = None
         self._conn_lock: Optional[asyncio.Lock] = None
         self._write_queue: List[LeakedKey] = []
@@ -115,6 +116,26 @@ class AsyncDatabase:
                 scan_time DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        for ddl in (
+            "ALTER TABLE leaked_keys ADD COLUMN run_id TEXT DEFAULT ''",
+            "ALTER TABLE leaked_keys ADD COLUMN checked_host TEXT DEFAULT ''",
+        ):
+            try:
+                await db.execute(ddl)
+            except Exception:
+                pass
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS scan_runs (
+                id TEXT PRIMARY KEY,
+                scope TEXT NOT NULL DEFAULT '',
+                started_at TEXT NOT NULL,
+                finished_at TEXT,
+                stats TEXT DEFAULT ''
+            )
+        """)
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_run_id ON leaked_keys(run_id)"
+        )
         await db.commit()
 
         if start_flusher:
@@ -123,7 +144,7 @@ class AsyncDatabase:
 
     async def connect(self) -> "AsyncDatabase":
         """在当前事件循环上打开一条新连接，与同路径实例共享 claim 集合。"""
-        bound = AsyncDatabase(self.db_path)
+        bound = AsyncDatabase(self.db_path, run_id=self.run_id)
         await bound.init(start_flusher=False)
         return bound
 
@@ -158,6 +179,8 @@ class AsyncDatabase:
             key.model_tier,
             key.rpm,
             key.found_time.isoformat() if key.found_time else datetime.now().isoformat(),
+            key.run_id or self.run_id or "",
+            key.checked_host or "",
         )
 
     async def _flush_queue(self):
@@ -179,8 +202,8 @@ class AsyncDatabase:
                     await self._conn.execute(
                         """
                         INSERT OR IGNORE INTO leaked_keys
-                        (platform, api_key, key_hash, base_url, status, source_url, model_tier, rpm, found_time)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        (platform, api_key, key_hash, base_url, status, source_url, model_tier, rpm, found_time, run_id, checked_host)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         self._row_values(key),
                     )
@@ -243,21 +266,34 @@ class AsyncDatabase:
             await self._conn.execute(
                 """
                 INSERT INTO leaked_keys
-                (platform, api_key, key_hash, base_url, status, source_url, model_tier, rpm, found_time, verified_time)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (platform, api_key, key_hash, base_url, status, source_url, model_tier, rpm, found_time, run_id, checked_host, verified_time)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(key_hash) DO UPDATE SET
                     status=excluded.status,
                     model_tier=excluded.model_tier,
                     rpm=excluded.rpm,
                     verified_time=excluded.verified_time,
                     base_url=excluded.base_url,
-                    source_url=excluded.source_url
+                    source_url=excluded.source_url,
+                    run_id=excluded.run_id,
+                    checked_host=excluded.checked_host
                 """,
                 values + (verified_time,),
             )
             await self._conn.commit()
         with self._claim_lock:
             self._pending_hashes.discard(values[2])
+
+    async def attach_run(self, api_key: str, run_id: str = "") -> None:
+        rid = run_id or self.run_id
+        if not api_key or not rid or self._conn is None or self._conn_lock is None:
+            return
+        async with self._conn_lock:
+            await self._conn.execute(
+                "UPDATE leaked_keys SET run_id = ? WHERE key_hash = ?",
+                (rid, vault.hash_key(api_key)),
+            )
+            await self._conn.commit()
 
     async def key_exists(self, api_key: str) -> bool:
         """检查 Key 是否存在（按 key_hash 指纹查询，含未落盘的在途项）"""

@@ -10,10 +10,11 @@
 
 import json
 from datetime import datetime, timezone
-from typing import Iterable
+from typing import Iterable, Optional
 from urllib.parse import urlparse
 
 from database import Database
+from run_artifacts import checked_host_from_url, public_status
 
 SCHEMA = "findings.v1"
 DISPOSITIONS = ("open", "notified", "rotated", "false_positive")
@@ -27,6 +28,9 @@ _FINDING_FIELDS = (
     "location",
     "disposition",
     "found_time",
+    "run_id",
+    "checked_host",
+    "status",
 )
 
 
@@ -57,6 +61,7 @@ def _finding_from_row(row: dict) -> dict:
     disposition = row.get("disposition") or "open"
     if disposition not in DISPOSITIONS:
         disposition = "open"
+    host = (row.get("checked_host") or "").strip() or checked_host_from_url(row.get("base_url") or "")
     return {
         "fingerprint": row.get("fingerprint") or "",
         "platform": row.get("platform") or "",
@@ -67,17 +72,25 @@ def _finding_from_row(row: dict) -> dict:
         "location": row.get("location") or "",
         "disposition": disposition,
         "found_time": row.get("found_time") or "",
+        "run_id": row.get("run_id") or "",
+        "checked_host": host,
+        "status": public_status(row.get("status") or ""),
     }
 
 
-def build_document(db_path: str) -> dict:
+def build_document(db_path: str, run_id: Optional[str] = None, live_only: bool = False) -> dict:
     db = Database(db_path)
-    findings = [_finding_from_row(row) for row in db.list_finding_sources()]
-    return {
+    findings = [_finding_from_row(row) for row in db.list_finding_sources(run_id or "")]
+    if live_only:
+        findings = [item for item in findings if item["status"] in ("live", "quota")]
+    document = {
         "schema": SCHEMA,
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "findings": findings,
     }
+    if run_id:
+        document["run_id"] = run_id
+    return document
 
 
 def disclosure_notice(platform: str, preview: str, location: str) -> str:

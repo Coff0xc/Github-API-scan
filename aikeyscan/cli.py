@@ -11,7 +11,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         sys.argv = [sys.argv[0], *list(argv)]
     from scanner_main import main as run
 
-    run()
+    code = run()
+    raise SystemExit(0 if code is None else code)
 
 
 if __name__ == "__main__":

@@ -375,7 +375,8 @@ def run_local_scan(
     from validator_optimized import start_validators
 
     db = Database(db_path or config.db_path)
-    async_db = AsyncDatabase(db.db_path)
+    run_id = db.create_run(f"local:{os.path.abspath(root)}")
+    async_db = AsyncDatabase(db.db_path, run_id=run_id)
     init_loop = _asyncio.new_event_loop()
     try:
         init_loop.run_until_complete(async_db.init())
@@ -427,4 +428,7 @@ def run_local_scan(
         for thread in validator_threads:
             thread.join(timeout=5)
 
-    return db.get_stats()
+    stats = db.get_stats()
+    db.finish_run(run_id, stats)
+    stats["run_id"] = run_id
+    return stats

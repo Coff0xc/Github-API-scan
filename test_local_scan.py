@@ -164,6 +164,50 @@ def test_optimized_worker_drains_sync_queue_and_upserts(monkeypatch):
         assert len(rows) == 1
         assert rows[0].api_key == KEY
         assert rows[0].status == KeyStatus.INVALID.value
+        assert rows[0].checked_host == "api.openai.com"
+
+
+def test_connection_error_persists_as_unknown(monkeypatch):
+    from async_database import AsyncDatabase
+    from validator import ValidationResult
+    from validator_optimized import OptimizedAsyncValidator, start_validators
+
+    async def fake_openai(self, api_key, base_url):
+        return ValidationResult(KeyStatus.CONNECTION_ERROR, "timeout")
+
+    monkeypatch.setattr(OptimizedAsyncValidator, "validate_openai", fake_openai)
+
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as root:
+        path = os.path.join(root, "keys.db")
+        async_db = AsyncDatabase(path, run_id="run-test")
+        asyncio.run(async_db.init())
+        pending = queue.Queue()
+        stop = threading.Event()
+        threads = start_validators(
+            pending, async_db, stop, num_workers=1, cache_config=None,
+        )
+        pending.put(ScanResult(
+            platform="openai",
+            api_key=KEY,
+            base_url="https://relay.example.invalid/v1",
+            source_url="https://example.test/settings.py",
+        ))
+        deadline = time.time() + 8
+        rows = []
+        while time.time() < deadline:
+            db = Database(path)
+            rows = db.get_keys_by_status(KeyStatus.UNKNOWN)
+            if rows:
+                break
+            time.sleep(0.05)
+        stop.set()
+        for thread in threads:
+            thread.join(timeout=3)
+        asyncio.run(async_db.close())
+        assert len(rows) == 1
+        assert rows[0].status == KeyStatus.UNKNOWN.value
+        assert rows[0].checked_host == "relay.example.invalid"
+        assert rows[0].run_id == "run-test"
 
 
 if __name__ == "__main__":

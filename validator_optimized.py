@@ -40,6 +40,7 @@ from connection_pool import get_connection_pool
 from retry_handler import RetryHandler, RetryConfig, ErrorType
 
 from cache_manager import CacheManager, CacheConfig, get_cache_manager
+from run_artifacts import checked_host_from_url, persist_status
 
 # 导入原有的熔断器和工具函数
 from validator import (
@@ -493,6 +494,7 @@ async def optimized_validator_worker(
 
                 if not await db.claim_key(result.api_key):
                     logger.debug(f"[Validator-{worker_id}] Key 已存在,跳过: {masked}")
+                    await db.attach_run(result.api_key)
                     _safe_dashboard(dashboard, "increment_stat", "skipped_duplicate")
                     continue
 
@@ -509,7 +511,7 @@ async def optimized_validator_worker(
                         circuit_breaker=circuit_breaker
                     )
 
-                status_value = status.value if isinstance(status, KeyStatus) else status
+                status_value = persist_status(status)
                 await db.upsert_finding(LeakedKey(
                     platform=result.platform,
                     api_key=result.api_key,
@@ -518,11 +520,17 @@ async def optimized_validator_worker(
                     status=status_value,
                     model_tier=model_tier or "",
                     rpm=rpm or 0,
+                    run_id=db.run_id,
+                    checked_host=checked_host_from_url(result.base_url or ""),
                 ))
                 processed_count += 1
 
                 source_url = getattr(result, "source_url", "") or ""
-                if status in (KeyStatus.VALID, KeyStatus.QUOTA_EXCEEDED):
+                try:
+                    stored = KeyStatus(status_value)
+                except ValueError:
+                    stored = KeyStatus.UNKNOWN
+                if stored in (KeyStatus.VALID, KeyStatus.QUOTA_EXCEEDED):
                     try:
                         from notify_integration import disclose_finding
                         await disclose_finding(
@@ -532,7 +540,7 @@ async def optimized_validator_worker(
                         logger.error(f"[Validator-{worker_id}] 处置通知失败: {notify_error}")
 
                 source_short = source_url.rsplit('/', 1)[-1]
-                if status == KeyStatus.VALID:
+                if stored == KeyStatus.VALID:
                     _safe_dashboard(dashboard, "increment_stat", "valid_keys")
                     _safe_dashboard(dashboard, "add_valid_key",
                                     platform=result.platform,
@@ -541,12 +549,12 @@ async def optimized_validator_worker(
                     _safe_dashboard(dashboard, "add_log",
                                     f"✓ 有效! {model_tier or platform.upper()} {masked}",
                                     "VALID")
-                elif status == KeyStatus.QUOTA_EXCEEDED:
+                elif stored == KeyStatus.QUOTA_EXCEEDED:
                     _safe_dashboard(dashboard, "increment_stat", "quota_exceeded")
                     _safe_dashboard(dashboard, "add_log", f"⚠ 配额耗尽 {masked}", "WARN")
-                elif status == KeyStatus.CONNECTION_ERROR:
+                elif stored == KeyStatus.UNKNOWN:
                     _safe_dashboard(dashboard, "increment_stat", "connection_errors")
-                    _safe_dashboard(dashboard, "add_log", f"✗ 连接失败 {masked}", "ERROR")
+                    _safe_dashboard(dashboard, "add_log", f"✗ 未确认 {masked}", "ERROR")
                 else:
                     _safe_dashboard(dashboard, "increment_stat", "invalid_keys")
 
@@ -555,9 +563,20 @@ async def optimized_validator_worker(
 
             except Exception as e:
                 try:
-                    await db.release_claim(result.api_key)
+                    await db.upsert_finding(LeakedKey(
+                        platform=getattr(result, "platform", "") or "",
+                        api_key=result.api_key,
+                        base_url=getattr(result, "base_url", "") or "",
+                        source_url=getattr(result, "source_url", "") or "",
+                        status=KeyStatus.UNKNOWN.value,
+                        run_id=db.run_id,
+                        checked_host=checked_host_from_url(getattr(result, "base_url", "") or ""),
+                    ))
                 except Exception:
-                    pass
+                    try:
+                        await db.release_claim(result.api_key)
+                    except Exception:
+                        pass
                 logger.error(f"[Validator-{worker_id}] 验证异常: {e}")
                 _safe_dashboard(dashboard, "add_log", f"[✗] 验证错误: {str(e)[:50]}", "ERROR")
 

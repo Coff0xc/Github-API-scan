@@ -46,6 +46,7 @@ from connection_pool import get_connection_pool, close_connection_pool
 from cache_manager import get_cache_manager, close_cache_manager, CacheConfig
 from export_io import decrypt_keys, export_keys, export_keys_csv, export_keys_encrypted
 from findings_feed import apply_dispositions, set_one_disposition, write_findings
+from run_artifacts import EXIT_CONFIG, write_scan_artifacts
 from use_boundary import (
     check_authorization,
     public_sources_allowed,
@@ -128,6 +129,7 @@ class OptimizedSecretScannerV22:
         self.enable_gitlab = enable_gitlab
         self.enable_realtime = enable_realtime
         self.pastebin_api_key = pastebin_api_key
+        self.run_id = ""
 
         # 信号处理
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -140,7 +142,7 @@ class OptimizedSecretScannerV22:
     async def _init_async_resources(self):
         """初始化异步资源"""
         # 初始化异步数据库
-        self.async_db = AsyncDatabase(config.db_path)
+        self.async_db = AsyncDatabase(config.db_path, run_id=self.run_id)
         await self.async_db.init()
         logger.info("异步数据库初始化完成")
 
@@ -183,6 +185,13 @@ class OptimizedSecretScannerV22:
 
         # 扫描线程用同步 Database；验证线程用 AsyncDatabase.connect()
         self.db = Database(config.db_path)
+        if self.target_repo:
+            scope = f"repo:{self.target_repo}"
+        elif self.target_org:
+            scope = f"org:{self.target_org}"
+        else:
+            scope = "github"
+        self.run_id = self.db.create_run(scope)
 
         # 初始化异步资源
         loop = asyncio.new_event_loop()
@@ -364,6 +373,11 @@ class OptimizedSecretScannerV22:
             if thread and thread.is_alive():
                 thread.join(timeout=5)
 
+        if self.db and self.run_id:
+            try:
+                self.db.finish_run(self.run_id, self.db.get_stats())
+            except Exception:
+                pass
         logger.info("扫描系统已停止")
 
 
@@ -408,8 +422,21 @@ def show_stats(db_path: str):
 #                          主函数
 # ============================================================================
 
+def _emit_scan_artifacts(args, run_id: str) -> int:
+    summary, code = write_scan_artifacts(
+        config.db_path,
+        run_id or "",
+        findings_json=args.findings_json or "findings.json",
+        live_only=bool(args.live_only),
+        fmt=args.format or "json",
+        report_path=args.report or "",
+    )
+    print(summary)
+    return code
+
+
 def main():
-    """主函数"""
+    """主函数。0 无活密钥，2 有活密钥，1 配置/授权失败。"""
     parser = argparse.ArgumentParser(
         description="GitHub Secret Scanner Pro v2.2 - 智能缓存版",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -478,12 +505,16 @@ v2.1 优化（保留）:
                         help='生成 Markdown 威胁报告（存活凭据清单 + 处置建议）')
     parser.add_argument('--reveal-report', action='store_true',
                         help='威胁报告中输出完整 Key（默认脱敏）')
+    parser.add_argument('--live-only', action='store_true',
+                        help='只写出存活配对（live 与 quota）')
+    parser.add_argument('--format', default='json', metavar='FMT',
+                        help='产物格式：json（findings+md，默认）、sarif、all')
 
     args = parser.parse_args()
 
     # 使用边界确认（--authorized 或环境变量 SCANNER_AUTHORIZED=1 可跳过交互）
     if not check_authorization(getattr(args, "authorized", False)):
-        return
+        return EXIT_CONFIG
 
     if args.proxy:
         config.proxy_url = args.proxy
@@ -493,21 +524,20 @@ v2.1 优化（保留）:
     # 本地资产扫描模式（目录 + 全量 Git 历史 → 统一验证管线）
     if args.scan_local:
         if not storage_encryption_ready(args.allow_plaintext_db):
-            return
+            return EXIT_CONFIG
         from local_scanner import run_local_scan
-        run_local_scan(args.scan_local, config.db_path,
+        stats = run_local_scan(args.scan_local, config.db_path,
                        scan_git_history=not args.no_git_history)
-        print(write_findings(config.db_path, args.findings_json or "findings.json"))
-        if args.report:
-            from threat_report import generate_report
-            print(generate_report(config.db_path, args.report, reveal=args.reveal_report))
-        return
+        run_id = ""
+        if isinstance(stats, dict):
+            run_id = stats.get("run_id") or ""
+        return _emit_scan_artifacts(args, run_id)
 
     # 威胁报告模式（基于已有数据库，不扫描）
     if args.report:
         from threat_report import generate_report
         print(generate_report(config.db_path, args.report, reveal=args.reveal_report))
-        return
+        return 0
 
     # 代理管道：没有扫描目标时，只出脱敏发现或按指纹写回。有扫描目标时，扫完再写 findings。
     wants_scan = bool(args.scan_local or args.target_org or args.target_repo)
@@ -522,15 +552,15 @@ v2.1 优化（保留）:
         print(write_findings(config.db_path, args.findings_json))
         did_finding_op = True
     if did_finding_op and not wants_scan:
-        return
+        return 0
 
     # 导出模式（默认脱敏；完整值需要 --reveal）
     if args.decrypt:
         if not args.key_file:
             print("[ABORT] --decrypt 需要同时提供 --key-file。")
-            return
+            return EXIT_CONFIG
         decrypt_keys(args.decrypt, args.key_file)
-        return
+        return 0
 
     if args.export or args.export_csv or args.export_encrypted:
         if args.export:
@@ -539,12 +569,12 @@ v2.1 优化（保留）:
             export_keys_csv(config.db_path, args.export_csv, args.status, reveal=args.reveal)
         if args.export_encrypted:
             export_keys_encrypted(config.db_path, args.export_encrypted, args.status)
-        return
+        return 0
 
     # 统计模式
     if args.stats:
         show_stats(config.db_path)
-        return
+        return 0
 
     # 扫描模式
     enable_pastebin = args.pastebin or args.all_sources
@@ -556,11 +586,11 @@ v2.1 优化（保留）:
         enable_pastebin, enable_gist, enable_searchcode, enable_gitlab, enable_realtime,
     ))
     if wants_public and not public_sources_allowed(args.allow_public_sources):
-        return
+        return EXIT_CONFIG
     if not require_remote_scope(args.target_org or "", args.target_repo or ""):
-        return
+        return EXIT_CONFIG
     if not storage_encryption_ready(args.allow_plaintext_db):
-        return
+        return EXIT_CONFIG
 
     scanner = OptimizedSecretScannerV22(
         enable_pastebin=enable_pastebin,
@@ -576,8 +606,8 @@ v2.1 优化（保留）:
     )
 
     scanner.start()
-    print(write_findings(config.db_path, args.findings_json or "findings.json"))
+    return _emit_scan_artifacts(args, scanner.run_id)
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main() or 0)

@@ -79,19 +79,21 @@ def test_unscoped_remote_scan_stops():
     result = _run_entry("main_v2.2.py", "--authorized")
     combined = result.stdout + result.stderr
     assert "target-org" in combined
-    assert result.returncode == 0
+    assert result.returncode == 1
 
 
 def test_public_source_without_opt_in_stops():
     result = _run_entry("main_v2.2.py", "--authorized", "--target-org", "acme", "--gist")
     combined = result.stdout + result.stderr
     assert "allow-public-sources" in combined
+    assert result.returncode == 1
 
 
 def test_scoped_scan_still_requires_encryption():
     result = _run_entry("main_v2.2.py", "--authorized", "--target-org", "acme")
     combined = result.stdout + result.stderr
     assert "DB_ENCRYPTION_KEY" in combined
+    assert result.returncode == 1
 
 
 def test_single_entry_point():
